@@ -121,6 +121,11 @@ class KingPet:
         self.win.move(int(self.x), int(self.y))
         self.win.show_all()
 
+        # Announce arrival — play Mah-Boi once immediately on launch
+        mah_boi = os.path.join(SCRIPT_DIR, "Mah-Boi.mp3")
+        if os.path.isfile(mah_boi):
+            self._play_voice(mah_boi)
+
         GLib.timeout_add(TICK_MS, self._tick)
 
     # ── Audio ──────────────────────────────────────────────────────────────────
