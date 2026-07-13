@@ -110,6 +110,11 @@ class KingPet:
         self.bounce_phase = 0.0
         self.facing       = 1   # +1 = right (default), -1 = left
 
+        # -- Death animation state
+        self._dying     = False
+        self._die_tick  = 0
+        self._die_alpha = 1.0
+
         # ── Audio state ───────────────────────────────────────────────────────
         self._audio_playing = False   # guard: don't overlap clips
         self._voice_counter = VOICE_CHECK_EVERY  # count down to first check
@@ -152,30 +157,37 @@ class KingPet:
         t = threading.Thread(target=_worker, daemon=True)
         t.start()
 
-    def _play_goodbye(self):
-        """Play king-oh.mp3 synchronously (blocks until done) then quit."""
+    def _start_goodbye(self):
+        """Fire king-oh.mp3 immediately at the start of the death animation."""
         path = GOODBYE_CLIP
         if not os.path.isfile(path):
-            Gtk.main_quit()
             return
-        try:
-            if AUDIO == "pygame":
+        if AUDIO == "pygame":
+            try:
                 sound = pygame.mixer.Sound(path)
-                ch = sound.play()
-                import time
-                while ch.get_busy():
-                    time.sleep(0.05)
-            else:
-                subprocess.run(["aplay", path],
-                               stdout=subprocess.DEVNULL,
-                               stderr=subprocess.DEVNULL)
-        finally:
-            Gtk.main_quit()
+                sound.play()
+            except Exception:
+                pass
+        else:
+            subprocess.Popen(["aplay", path],
+                             stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL)
+
+    def _play_goodbye(self):
+        """Wait for the goodbye clip to finish, then quit."""
+        import time
+        if AUDIO == "pygame":
+            while pygame.mixer.get_busy():
+                time.sleep(0.05)
+        # aplay was Popen'd; it runs to completion on its own
+        Gtk.main_quit()
 
     def _quit(self, *_):
-        """Play goodbye clip in a thread, then quit (keeps GTK responsive)."""
-        t = threading.Thread(target=self._play_goodbye, daemon=True)
-        t.start()
+        """Trigger death animation; audio + actual quit fire at its end."""
+        if self._dying:
+            return
+        self._dying   = True
+        self._die_tick = 0
 
     def _maybe_speak(self):
         """Called periodically; randomly picks and plays a voice line."""
@@ -231,12 +243,18 @@ class KingPet:
 
     # ── Behaviour scheduler ───────────────────────────────────────────────────
     BEHAVIOURS = [
-        ("walk",   120),
-        ("bounce",  90),
-        ("spin",    60),
-        ("squish",  80),
-        ("shake",   50),
-        ("zoom",    70),
+        ("walk",      120),
+        ("bounce",     90),
+        ("spin",       60),
+        ("squish",     80),
+        ("shake",      50),
+        ("zoom",       70),
+        ("tilt",       100),  # slow seasick rocking side to side
+        ("stomp",       60),  # rapid vertical pounding like he's throwing a tantrum
+        ("panic",       80),  # erratic zigzag sprinting, very fast
+        ("nod",         70),  # enthusiastic vertical squash-and-stretch
+        ("moonwalk",    90),  # slides backwards while facing forwards
+        ("vibrate",     45),  # extremely fast tiny jitter like a broken appliance
     ]
 
     def _pick_new_behaviour(self):
@@ -250,6 +268,10 @@ class KingPet:
 
     # ── Main tick ─────────────────────────────────────────────────────────────
     def _tick(self):
+        if self._dying:
+            self._tick_death()
+            return True
+
         self.tick += 1
         self.anim_timer -= 1
         if self.anim_timer <= 0:
@@ -265,6 +287,50 @@ class KingPet:
         self._move()
         self._render()
         return True
+
+    def _tick_death(self):
+        # 3-phase death: 0-20 shocked flail, 20-50 spin+shrink, 50-80 fade out
+        d = self._die_tick
+        self._die_tick += 1
+
+        if d == 0:
+            self._start_goodbye()  # fire audio immediately, animation plays over it
+
+        if d < 20:
+            self.squish_x   = 1.0 + 0.55 * math.sin(d * 1.9)
+            self.squish_y   = 1.0 - 0.55 * math.sin(d * 1.9)
+            self.angle      = 30 * math.sin(d * 1.4)
+            self._die_alpha = 1.0
+            self.x += 9 * math.sin(d * 2.3)
+            self.y += 6 * math.sin(d * 1.8)
+
+        elif d < 50:
+            p = (d - 20) / 30.0
+            scale = 1.0 - 0.85 * p
+            self.squish_x   = scale
+            self.squish_y   = scale
+            self.angle      = (d * 18) % 360
+            self._die_alpha = 1.0 - 0.5 * p
+
+        elif d < 80:
+            p = (d - 50) / 30.0
+            scale = 0.15 - 0.13 * p
+            self.squish_x   = max(0.01, scale)
+            self.squish_y   = max(0.01, scale)
+            self.angle      = (d * 22) % 360
+            self._die_alpha = max(0.0, 0.5 - 0.5 * p)
+
+        else:
+            # Animation done -- wait for audio to finish, then quit
+            self.squish_x   = 0.01
+            self.squish_y   = 0.01
+            self._die_alpha = 0.0
+            self._render()
+            t = threading.Thread(target=self._play_goodbye, daemon=True)
+            t.start()
+            return
+
+        self._render()
 
     def _update_animation(self):
         t = self.tick
@@ -309,18 +375,73 @@ class KingPet:
             self.squish_y = scale
             self.angle    = 0.0
 
+        elif a == "tilt":
+            # Slow seasick rocking — leans far left and right like he's on a ship
+            self.angle    = 35 * math.sin(t * 0.08)
+            self.squish_x = 1.0
+            self.squish_y = 1.0
+
+        elif a == "stomp":
+            # Rapid vertical pounding — squashes hard on the beat like a tantrum
+            phase = (t % 10) / 10.0
+            impact = math.pow(math.sin(phase * math.pi), 3)  # sharp hit, soft release
+            self.squish_x = 1.0 + 0.45 * impact
+            self.squish_y = 1.0 - 0.45 * impact
+            self.angle    = 0.0
+
+        elif a == "panic":
+            # Frantic zigzag — slight lean in travel direction, wobbles wildly
+            self.squish_x = 1.0 + 0.06 * math.sin(t * 0.9)
+            self.squish_y = 1.0 - 0.06 * math.sin(t * 0.9)
+            self.angle    = -12 * math.sin(t * 0.7)  # frantic leaning
+
+        elif a == "nod":
+            # Enthusiastic vertical squash — tall-thin, short-wide, tall-thin
+            phase = (t % 20) / 20.0
+            nod = math.sin(phase * 2 * math.pi)
+            self.squish_x = 1.0 - 0.2 * nod
+            self.squish_y = 1.0 + 0.3 * nod
+            self.angle    = 0.0
+
+        elif a == "moonwalk":
+            # Slides in the direction OPPOSITE to facing — cool guy energy
+            self.squish_x = 1.0 + 0.03 * math.sin(t * 0.3)
+            self.squish_y = 1.0 - 0.03 * math.sin(t * 0.3)
+            self.angle    = 0.0
+
+        elif a == "vibrate":
+            # Extremely fast tiny jitter — like he touched an electric fence
+            self.squish_x = 1.0 + 0.08 * math.sin(t * 2.8)
+            self.squish_y = 1.0 - 0.08 * math.sin(t * 2.8)
+            self.angle    = 8 * math.sin(t * 3.1)
+
     def _move(self):
         if self.anim == "spin":
             self.x += self.vx * 0.3
             self.y += self.vy * 0.3
         elif self.anim == "shake":
             self.x += 6 * math.sin(self.tick * 0.8)
+        elif self.anim == "stomp":
+            self.x += self.vx * 0.1   # pounds almost in place
+            self.y += self.vy * 0.1
+        elif self.anim == "panic":
+            self.x += self.vx * 2.2   # sprints at double speed
+            self.y += self.vy * 2.2 + 4 * math.sin(self.tick * 0.5)  # zigzag
+        elif self.anim == "tilt":
+            self.x += self.vx * 0.4   # dignified slow drift
+            self.y += self.vy * 0.4
+        elif self.anim == "vibrate":
+            self.x += self.vx * 0.15 + 3 * math.sin(self.tick * 3.3)  # rattles on spot
+            self.y += self.vy * 0.15 + 3 * math.cos(self.tick * 2.9)
+        elif self.anim == "moonwalk":
+            self.x -= self.vx          # moves BACKWARDS relative to facing
+            self.y += self.vy * 0.3
         else:
             self.x += self.vx
             self.y += self.vy
 
-        # Track which way the King is walking (ignore shake's oscillating x)
-        if self.anim != "shake" and self.vx != 0:
+        # Track facing -- moonwalk/shake/vibrate/stomp don't update it
+        if self.anim not in ("shake", "vibrate", "stomp", "moonwalk") and self.vx != 0:
             self.facing = 1 if self.vx > 0 else -1
 
         eff_w = BASE_W * abs(self.squish_x)
@@ -365,7 +486,7 @@ class KingPet:
             cr.scale(-1, 1)
 
         Gdk.cairo_set_source_pixbuf(cr, scaled, 0, 0)
-        cr.paint()
+        cr.paint_with_alpha(self._die_alpha)
         cr.restore()
         return False
 
