@@ -27,6 +27,8 @@ import threading
 
 # ── Audio backend (pygame preferred, falls back to aplay) ─────────────────────
 try:
+    os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")  # suppresses "Hello from pygame"
+    os.environ.setdefault("PYGAME_DETECT_AVX2", "1")          # suppresses AVX2 RuntimeWarning
     import pygame
     pygame.mixer.init()
     AUDIO = "pygame"
@@ -47,6 +49,8 @@ VOICE_LINES = [
 # Keep only files that actually exist next to the script
 VOICE_LINES = [os.path.join(SCRIPT_DIR, f) for f in VOICE_LINES
                if os.path.isfile(os.path.join(SCRIPT_DIR, f))]
+
+GOODBYE_CLIP = os.path.join(SCRIPT_DIR, "king-oh.mp3")
 
 BASE_W, BASE_H = 268, 230
 SPEED    = 3
@@ -104,6 +108,7 @@ class KingPet:
         self.squish_y     = 1.0
         self.angle        = 0.0
         self.bounce_phase = 0.0
+        self.facing       = 1   # +1 = right (default), -1 = left
 
         # ── Audio state ───────────────────────────────────────────────────────
         self._audio_playing = False   # guard: don't overlap clips
@@ -142,6 +147,31 @@ class KingPet:
         t = threading.Thread(target=_worker, daemon=True)
         t.start()
 
+    def _play_goodbye(self):
+        """Play king-oh.mp3 synchronously (blocks until done) then quit."""
+        path = GOODBYE_CLIP
+        if not os.path.isfile(path):
+            Gtk.main_quit()
+            return
+        try:
+            if AUDIO == "pygame":
+                sound = pygame.mixer.Sound(path)
+                ch = sound.play()
+                import time
+                while ch.get_busy():
+                    time.sleep(0.05)
+            else:
+                subprocess.run(["aplay", path],
+                               stdout=subprocess.DEVNULL,
+                               stderr=subprocess.DEVNULL)
+        finally:
+            Gtk.main_quit()
+
+    def _quit(self, *_):
+        """Play goodbye clip in a thread, then quit (keeps GTK responsive)."""
+        t = threading.Thread(target=self._play_goodbye, daemon=True)
+        t.start()
+
     def _maybe_speak(self):
         """Called periodically; randomly picks and plays a voice line."""
         if not VOICE_LINES:
@@ -160,7 +190,7 @@ class KingPet:
             menu = Gtk.Menu()
             for label, cb in [("Toggle King Harkinian", self._toggle),
                                ("Speak!", lambda *_: self._play_voice(random.choice(VOICE_LINES)) if VOICE_LINES else None),
-                               ("Quit",   lambda *_: Gtk.main_quit())]:
+                               ("Quit",   self._quit)]:
                 item = Gtk.MenuItem(label=label)
                 item.connect("activate", cb)
                 menu.append(item)
@@ -175,7 +205,7 @@ class KingPet:
         menu = Gtk.Menu()
         for label, cb in [("Toggle King Harkinian", self._toggle),
                            ("Speak!", lambda *_: self._play_voice(random.choice(VOICE_LINES)) if VOICE_LINES else None),
-                           ("Quit",   lambda *_: Gtk.main_quit())]:
+                           ("Quit",   self._quit)]:
             item = Gtk.MenuItem(label=label)
             item.connect("activate", cb)
             menu.append(item)
@@ -192,7 +222,7 @@ class KingPet:
         if event.button == 1:   # left-click → speak immediately
             self._play_voice(random.choice(VOICE_LINES)) if VOICE_LINES else None
         elif event.button == 3: # right-click → quit
-            Gtk.main_quit()
+            self._quit()
 
     # ── Behaviour scheduler ───────────────────────────────────────────────────
     BEHAVIOURS = [
@@ -284,6 +314,10 @@ class KingPet:
             self.x += self.vx
             self.y += self.vy
 
+        # Track which way the King is walking (ignore shake's oscillating x)
+        if self.anim != "shake" and self.vx != 0:
+            self.facing = 1 if self.vx > 0 else -1
+
         eff_w = BASE_W * abs(self.squish_x)
         eff_h = BASE_H * abs(self.squish_y)
         if self.x < 0:                    self.x = 0;                   self.vx =  abs(self.vx)
@@ -313,20 +347,33 @@ class KingPet:
         scaled = self.base_pixbuf.scale_simple(
             w, h, GdkPixbuf.InterpType.NEAREST)
 
+        cr.save()
+
+        # Spin handles its own rotation; for everything else apply facing flip
         if self.angle != 0.0:
             cr.translate(w / 2, h / 2)
             cr.rotate(math.radians(self.angle))
             cr.translate(-w / 2, -h / 2)
+        elif self.facing == -1:
+            # Mirror horizontally: flip around the vertical centre line
+            cr.translate(w, 0)
+            cr.scale(-1, 1)
 
         Gdk.cairo_set_source_pixbuf(cr, scaled, 0, 0)
         cr.paint()
+        cr.restore()
         return False
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     import signal
-    signal.signal(signal.SIGINT, signal.SIG_DFL)
+
+    def _signal_quit(signum, frame):
+        # Schedule the goodbye on the GTK main loop so it's safe to call GTK APIs
+        GLib.idle_add(pet._quit)
+
+    # pet isn't defined yet; we'll re-register after construction below
 
     if not VOICE_LINES:
         print("⚠  No voice MP3s found next to the script – running silent.")
@@ -334,4 +381,6 @@ if __name__ == "__main__":
         print(f"🎙  Loaded {len(VOICE_LINES)} voice line(s). Audio backend: {AUDIO}")
 
     pet = KingPet()
+    signal.signal(signal.SIGINT,  _signal_quit)
+    signal.signal(signal.SIGTERM, _signal_quit)
     Gtk.main()

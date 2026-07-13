@@ -42,6 +42,7 @@ Mah-Boi.mp3
 King-Harkinian-Laugh.mp3
 This-Peace-Is-What-All-True-Warriors-Strive-For.mp3
 scrub-all-the-floors-in-hyrule.mp3
+king-oh.mp3
 ```
 
 ---
@@ -61,7 +62,7 @@ That's it. The King appears. You're welcome, bitch.
 | Action | What it does |
 |---|---|
 | **Left-click** the King | Forces him to speak immediately. Rude, but effective. |
-| **Right-click** the King | Kills him. Quits the app. |
+| **Right-click** the King | Kills him. He'll have something to say about it. |
 | **Tray icon** (right-click) | Toggle visibility, make him speak, or quit |
 
 ---
@@ -70,7 +71,7 @@ That's it. The King appears. You're welcome, bitch.
 
 The King is a man of many talents. Here's what he gets up to:
 
-* **Walk** — A dignified stroll across your desktop
+* **Walk** — A dignified stroll across your desktop, facing whichever way he's actually going like a normal person
 * **Bounce** — Squishes on impact like the royalty he is
 * **Spin** — Absolutely unhinged 360° rotation
 * **Squish** — Chaotic stretching in all directions
@@ -92,6 +93,8 @@ Every ~5 seconds, there's a **55% chance** the King decides to open his mouth. T
 * *"Scrub all the floors in Hyrule!"*
 
 Voice lines will not overlap. The King has dignity. Barely, but still.
+
+And when you try to kill him? He gets the last word. `king-oh.mp3` plays in full before the program exits, whether you right-click him, use the tray menu, or hit `Ctrl+C` in the terminal. You can't silence royalty. 👑
 
 ---
 
@@ -139,6 +142,12 @@ Update the `Exec` path inside the file to match wherever you actually put the sc
 > **Q: Can I add my own voice lines?**
 > **A:** Yes! Drop any MP3 into the script folder and add the filename to the `VOICE_LINES` list in `king_harkinian_pet.py`. The King will add it to his repertoire immediately. 🎙️
 
+> **Q: Why does he face left sometimes?**
+> **A:** Because he's walking left, genius. He mirrors automatically depending on which direction he's moving. The spin animation is exempt because flipping during a 360° looks stupid, and the King has standards.
+
+> **Q: I get a bunch of pygame warnings in the terminal!**
+> **A:** You don't anymore. The script suppresses pygame's startup spam automatically. You're welcome.
+
 > **Q: This is stupid.**
 > **A:** Correct. 🙃
 
@@ -152,5 +161,7 @@ Update the `Exec` path inside the file to match wherever you actually put the sc
 ---
 
 (Note: This download includes a free desktop background made by super fabulous yours truly, That One Dutch Guy!)
+
+---
 
 > *"Enough! My ship sails in the morning!"* 👑🍷
