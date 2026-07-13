@@ -1,0 +1,10 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=King Harkinian Pet
+Comment=The King roams your desktop! My dinner!
+Icon=King-Harkinian-CD-i.png
+Exec=python3 /home/claude/king_harkinian_pet.py
+Terminal=false
+Categories=Amusement;
+StartupNotify=false

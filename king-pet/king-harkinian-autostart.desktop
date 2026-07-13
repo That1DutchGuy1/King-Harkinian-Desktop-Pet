@@ -1,0 +1,9 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=King Harkinian Pet
+Comment=The King roams your desktop! My dinner!
+Exec=python3 /home/YOUR_USERNAME/king_harkinian_pet.py
+Terminal=false
+Hidden=false
+X-GNOME-Autostart-enabled=true
