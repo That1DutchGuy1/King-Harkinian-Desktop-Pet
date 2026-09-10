@@ -42,8 +42,19 @@ Mah-Boi.mp3
 King-Harkinian-Laugh.mp3
 This-Peace-Is-What-All-True-Warriors-Strive-For.mp3
 scrub-all-the-floors-in-hyrule.mp3
+duke-onkled-under-attack.mp3
+enough.mp3
+im-going-to-gamelon.mp3
+hmm.mp3
+piece-of-shit.mp3
+triforce-of-courage.mp3
+ship-sails.mp3
+wonder-whats-for-dinner.mp3
+you-saved-me.mp3
 king-oh.mp3
 ```
+
+The script will silently skip any MP3s it can't find, so you won't get an error if you're missing some. You'll just get a less unhinged experience, which is your loss honestly.
 
 ---
 
@@ -77,8 +88,20 @@ The King is a man of many talents. Here's what he gets up to:
 * **Squish** — Chaotic stretching in all directions
 * **Shake** — Full-body trembling, probably excited about dinner
 * **Zoom** — Grows and shrinks like he's having a moment
+* **Tilt** — Slow, seasick rocking back and forth. He's on a ship. His ship sails in the morning. You know this.
+* **Stomp** — Rapid vertical pounding like he found out Link failed to save Zelda *again*
+* **Panic** — Frantic zigzag sprinting at double speed. Something has gone very wrong in Hyrule.
+* **Nod** — Enthusiastic squash-and-stretch bobbing. He agrees with whatever you're doing. He doesn't, but he's being polite.
+* **Moonwalk** — Slides backwards while facing forwards. The King has swag. Undeniable, inexplicable swag.
+* **Vibrate** — Extremely fast tiny jitter, like he touched an electric fence or read the royal tax return
+* **Warp** — Bad VHS tape energy. Corrupted video signal. Probably from a scratched CD-i disc, shocking.
+* **Chalice** — Looms directly at you, growing larger, personally shoving the chalice in your face. You cannot escape the chalice.
+* **Flatline** — Pancakes completely flat to the floor and creeps around like a condemned royal trying to escape under a door. Haunting.
+* **Dizzy** — Figure-8 wobble like he got smacked with a frying pan. He has been smacked with a frying pan.
+* **Creep** — Freezes completely still for a couple seconds, then SNAPS to a new location with no warning whatsoever. Low-budget horror movie. Do not look away.
+* **Glitch** — Corrupted CD-i disc. Random scale and angle snaps with no interpolation. He is broken. We are all a little broken.
 
-He switches between these randomly. Watch him become a gaaaawd!
+He switches between these randomly. Eighteen possible states of unhinged royalty. Watch him become a gaaaawd!
 
 ---
 
@@ -86,13 +109,22 @@ He switches between these randomly. Watch him become a gaaaawd!
 
 Every ~5 seconds, there's a **55% chance** the King decides to open his mouth. The available clips are:
 
-* *"Dinner!"*
-* *"Mah boi!"*
-* His iconic laugh
-* *"This peace is what all true warriors strive for!"*
-* *"Scrub all the floors in Hyrule!"*
+* *"Dinner!"* — he's hungry!
+* *"Mah boi!"* — you're his boi now, motherfucker.
+* *"OAHAHAHAHAHAHAHAAA!!"* — he's probably laughing at you.
+* *"This peace is what all true warriors strive for!"* — he thinks that... but Link doesn't.
+* *"Scrub all the floors in Hyrule!"* — used to be Duke Onkled's punishment. Now it's yours.
+* *"Duke Onkled is under attack by the evil forces!"* — urgent news delivery, zero context provided
+* *"Enough!"* — he's had it. With what? Everything. All of it.
+* *"I'm going to Gamelon!"* — he is going. He has decided. There is nothing you can do.
+* *"Hmm."* — profound. Weighty. He is thinking about dinner.
+* *"Piece of shit!"* — yeah, he's talking about you, dickhead.
+* *"The Triforce of Courage!"* — he says this with the energy of a man who has never held the Triforce of Courage
+* *"My ship sails in the morning!"* — it does. It always does. He says this at 3pm.
+* *"I wonder what's for dinner?"* — an eternal question. A philosophical inquiry. He already knows. It's dinner.
+* *"You saved me!"* — said with genuine surprise, as if he didn't hire you specifically for this
 
-Voice lines will not overlap. The King has dignity. Barely, but still.
+Voice lines will not overlap. The King has dignity. Barely, but still. The script only loads clips that are actually present on disk, so it won't crash just because you forgot to download `piece-of-shit.mp3`. Good for you.
 
 And when you try to kill him? He gets the last word. `king-oh.mp3` plays in full before the program exits, whether you right-click him, use the tray menu, or hit `Ctrl+C` in the terminal. You can't silence royalty. 👑
 
@@ -131,6 +163,18 @@ Update the `Exec` path inside the file to match wherever you actually put the sc
 
 ---
 
+## 🐛 FIXES & CHANGES
+
+### What's new in this update, you impatient person:
+
+**9 new voice lines** — The King has more to say now. He always had more to say. You just weren't listening.
+
+**6 new animations** — tilt, stomp, panic, nod, moonwalk, vibrate, warp, chalice, flatline, dizzy, creep, glitch. That's twelve. Twelve. The man contains multitudes.
+
+**Clipping fix** — Rotating animations used to clip the corners of the King's head off because the window wasn't big enough to hold the full diagonal of a rotated image. This was unacceptable. It has been fixed. The script now calculates the diagonal of the current (possibly squished) frame and sizes the canvas accordingly, then offsets the window position so the King appears to stay exactly where he should be. His crown is intact. As it should be. 👑
+
+---
+
 ## 💬 Q & A
 
 > **Q: Does this work on Windows or Mac?**
@@ -143,7 +187,13 @@ Update the `Exec` path inside the file to match wherever you actually put the sc
 > **A:** Yes! Drop any MP3 into the script folder and add the filename to the `VOICE_LINES` list in `king_harkinian_pet.py`. The King will add it to his repertoire immediately. 🎙️
 
 > **Q: Why does he face left sometimes?**
-> **A:** Because he's walking left, genius. He mirrors automatically depending on which direction he's moving. The spin animation is exempt because flipping during a 360° looks stupid, and the King has standards.
+> **A:** Because he's walking left, genius. He mirrors automatically depending on which direction he's moving. The spin, shake, vibrate, stomp, moonwalk, flatline, creep, and glitch animations are exempt from mirroring because they either don't travel, look stupid flipped, or are already chaotic enough that nobody's checking. The King has standards. Variable standards, but standards.
+
+> **Q: Why is he moonwalking in the wrong direction??**
+> **A:** He's not. That IS the moonwalk. He faces one way and slides the other. That's the whole bit. Michael Jackson invented it, the King borrowed it, and now it's on your desktop. You're welcome.
+
+> **Q: He just froze completely still and it's been like 5 seconds, is he broken?**
+> **A:** That's the creep animation. He's about to snap to a new location with zero warning. Stop staring at him. That's what he wants.
 
 > **Q: I get a bunch of pygame warnings in the terminal!**
 > **A:** You don't anymore. The script suppresses pygame's startup spam automatically. You're welcome.
