@@ -45,6 +45,15 @@ VOICE_LINES = [
     "King-Harkinian-Laugh.mp3",
     "This-Peace-Is-What-All-True-Warriors-Strive-For.mp3",
     "scrub-all-the-floors-in-hyrule.mp3",
+    "duke-onkled-under-attack.mp3",
+    "enough.mp3",
+    "im-going-to-gamelon.mp3",
+    "hmm.mp3",
+    "piece-of-shit.mp3",
+    "triforce-of-courage.mp3",
+    "ship-sails.mp3",
+    "wonder-whats-for-dinner.mp3",
+    "you-saved-me.mp3",
 ]
 # Keep only files that actually exist next to the script
 VOICE_LINES = [os.path.join(SCRIPT_DIR, f) for f in VOICE_LINES
@@ -109,6 +118,13 @@ class KingPet:
         self.angle        = 0.0
         self.bounce_phase = 0.0
         self.facing       = 1   # +1 = right (default), -1 = left
+
+        # Per-animation scratch state
+        self._creep_frozen  = 0    # ticks remaining in freeze phase
+        self._glitch_sx     = 1.0  # locked random values for current glitch frame
+        self._glitch_sy     = 1.0
+        self._glitch_ang    = 0.0
+        self._glitch_next   = 0    # tick when we next re-roll the glitch
 
         # -- Death animation state
         self._dying     = False
@@ -255,6 +271,12 @@ class KingPet:
         ("nod",         70),  # enthusiastic vertical squash-and-stretch
         ("moonwalk",    90),  # slides backwards while facing forwards
         ("vibrate",     45),  # extremely fast tiny jitter like a broken appliance
+        ("warp",        75),  # VHS bad-tape horizontal/vertical distortion flicker
+        ("chalice",     90),  # leans forward and looms large — presenting the chalice
+        ("flatline",   100),  # squashes pancake-flat and creeps along the ground
+        ("dizzy",       80),  # figure-8 wobble like he got bonked on the head
+        ("creep",      110),  # freezes then SNAPS to a new spot like low-budget horror
+        ("glitch",      55),  # corrupted CD-i data — random scale/angle snaps
     ]
 
     def _pick_new_behaviour(self):
@@ -263,6 +285,8 @@ class KingPet:
         self.anim_timer = duration
         self.angle      = 0.0
         self.bounce_phase = 0.0
+        self._creep_frozen = 0          # reset so creep starts with a freeze
+        self._glitch_next  = self.tick  # reset so glitch rolls immediately
         if random.random() < 0.3: self.vx *= -1
         if random.random() < 0.3: self.vy *= -1
 
@@ -415,6 +439,77 @@ class KingPet:
             self.squish_y = 1.0 - 0.08 * math.sin(t * 2.8)
             self.angle    = 8 * math.sin(t * 3.1)
 
+        elif a == "warp":
+            # Bad VHS tape — alternates between squashing wide and squashing tall
+            # with a rapid flicker so it looks like corrupted video signal
+            warp_phase = (t % 8) / 8.0
+            if warp_phase < 0.5:
+                warp = math.sin(warp_phase * 2 * math.pi)
+                self.squish_x = 1.0 + 0.6 * warp
+                self.squish_y = 1.0 - 0.4 * warp
+            else:
+                warp = math.sin((warp_phase - 0.5) * 2 * math.pi)
+                self.squish_x = 1.0 - 0.3 * warp
+                self.squish_y = 1.0 + 0.55 * warp
+            self.angle = 0.0
+
+        elif a == "chalice":
+            # Leans forward and dramatically LOOMS, growing towards the viewer
+            # like he's personally shoving the chalice in your face
+            phase = (t % 60) / 60.0
+            loom  = math.sin(phase * 2 * math.pi)
+            scale = 1.0 + 0.55 * max(0.0, loom)   # only grows, snaps back
+            self.squish_x = scale
+            self.squish_y = scale
+            self.angle    = 8 * math.sin(t * 0.07)  # slight proud lean
+
+        elif a == "flatline":
+            # Pancakes completely flat to the floor then slowly creeps around
+            # like a condemned royal trying to escape under a door
+            squash_cycle = (t % 80) / 80.0
+            if squash_cycle < 0.15:        # rapid squash-down
+                p = squash_cycle / 0.15
+                self.squish_y = 1.0 - 0.82 * p
+                self.squish_x = 1.0 + 0.7 * p
+            elif squash_cycle < 0.85:      # stays flat and creeps
+                self.squish_y = 0.18
+                self.squish_x = 1.7
+            else:                          # pops back up
+                p = (squash_cycle - 0.85) / 0.15
+                self.squish_y = 0.18 + 0.82 * p
+                self.squish_x = 1.7  - 0.7  * p
+            self.angle = 0.0
+
+        elif a == "dizzy":
+            # Figure-8 shaped wobble on both axes — like he got smacked with a frying pan
+            # X wobble and Y wobble are 90° out of phase so it traces an ellipse
+            self.angle    = 25 * math.sin(t * 0.11)
+            self.squish_x = 1.0 + 0.15 * math.sin(t * 0.22)
+            self.squish_y = 1.0 + 0.15 * math.cos(t * 0.22)
+
+        elif a == "creep":
+            # Completely still for ~2 seconds, then INSTANTLY snaps several pixels
+            # in a random direction — like a low-budget haunted portrait
+            self.squish_x = 1.0
+            self.squish_y = 1.0
+            self.angle    = 0.0
+            if self._creep_frozen <= 0:
+                self._creep_frozen = random.randint(50, 90)   # freeze duration
+            # movement is handled in _move(); just count down here
+            self._creep_frozen -= 1
+
+        elif a == "glitch":
+            # Corrupted CD-i disc — holds a random distorted pose for a few frames
+            # then snaps to a completely different one with no interpolation
+            if t >= self._glitch_next:
+                self._glitch_sx  = random.uniform(0.4, 1.8)
+                self._glitch_sy  = random.uniform(0.4, 1.8)
+                self._glitch_ang = random.choice([0, 0, 0, 15, -15, 30, -30, 45, 90, 180])
+                self._glitch_next = t + random.randint(3, 12)  # hold for 3-12 frames
+            self.squish_x = self._glitch_sx
+            self.squish_y = self._glitch_sy
+            self.angle    = float(self._glitch_ang)
+
     def _move(self):
         if self.anim == "spin":
             self.x += self.vx * 0.3
@@ -436,12 +531,38 @@ class KingPet:
         elif self.anim == "moonwalk":
             self.x -= self.vx          # moves BACKWARDS relative to facing
             self.y += self.vy * 0.3
+        elif self.anim == "warp":
+            self.x += self.vx * 0.5   # drifts slowly while distorting
+            self.y += self.vy * 0.5
+        elif self.anim == "chalice":
+            self.x += self.vx * 0.2   # barely moves — he's busy looming at YOU
+            self.y += self.vy * 0.2
+        elif self.anim == "flatline":
+            # Only moves while actually flat (mid-cycle)
+            cycle = (self.tick % 80) / 80.0
+            if 0.15 <= cycle < 0.85:
+                self.x += self.vx * 0.8   # creeps along the ground
+                self.y += self.vy * 0.3
+        elif self.anim == "dizzy":
+            self.x += self.vx * 0.35  # stumbles slowly
+            self.y += self.vy * 0.35
+        elif self.anim == "creep":
+            if self._creep_frozen <= 0:
+                # Snap! Teleport a chunky random distance
+                self.x += random.choice([-1, 1]) * random.randint(40, 120)
+                self.y += random.choice([-1, 1]) * random.randint(20, 80)
+        elif self.anim == "glitch":
+            # Teleports randomly every few frames like corrupted position data
+            if self.tick >= self._glitch_next - 1:   # same frame as the re-roll
+                self.x += random.choice([-1, 1]) * random.randint(0, 30)
+                self.y += random.choice([-1, 1]) * random.randint(0, 20)
         else:
             self.x += self.vx
             self.y += self.vy
 
-        # Track facing -- moonwalk/shake/vibrate/stomp don't update it
-        if self.anim not in ("shake", "vibrate", "stomp", "moonwalk") and self.vx != 0:
+        # Track facing -- some anims lock or ignore facing
+        if self.anim not in ("shake", "vibrate", "stomp", "moonwalk",
+                             "flatline", "creep", "glitch") and self.vx != 0:
             self.facing = 1 if self.vx > 0 else -1
 
         eff_w = BASE_W * abs(self.squish_x)
@@ -453,12 +574,34 @@ class KingPet:
 
     # ── Render ────────────────────────────────────────────────────────────────
     def _render(self):
-        new_w = max(10, int(BASE_W * abs(self.squish_x)))
-        new_h = max(10, int(BASE_H * abs(self.squish_y)))
-        self.win.resize(new_w, new_h)
-        self.win.move(int(self.x), int(self.y))
-        self._cur_w = new_w
-        self._cur_h = new_h
+        img_w = max(10, int(BASE_W * abs(self.squish_x)))
+        img_h = max(10, int(BASE_H * abs(self.squish_y)))
+
+        # If we're rotating, the window must be big enough to hold the full
+        # diagonal so no corners get clipped.  We use the diagonal of the
+        # *current* (possibly squished) image as the canvas size and centre
+        # the image inside it.
+        if self.angle != 0.0:
+            diag = math.ceil(math.hypot(img_w, img_h))
+            canvas_w = diag
+            canvas_h = diag
+        else:
+            canvas_w = img_w
+            canvas_h = img_h
+
+        # Offset the window so the *visual centre* of the King stays where
+        # self.x / self.y says it should be (top-left of the image rect).
+        offset_x = (canvas_w - img_w) // 2
+        offset_y = (canvas_h - img_h) // 2
+        win_x = int(self.x) - offset_x
+        win_y = int(self.y) - offset_y
+
+        self.win.resize(canvas_w, canvas_h)
+        self.win.move(win_x, win_y)
+        self._cur_img_w  = img_w
+        self._cur_img_h  = img_h
+        self._cur_canvas_w = canvas_w
+        self._cur_canvas_h = canvas_h
         self.win.queue_draw()
 
     def _on_draw(self, widget, cr):
@@ -467,23 +610,34 @@ class KingPet:
         cr.paint()
         cr.set_operator(2)  # OVER
 
-        w = self._cur_w if hasattr(self, "_cur_w") else BASE_W
-        h = self._cur_h if hasattr(self, "_cur_h") else BASE_H
+        img_w    = self._cur_img_w    if hasattr(self, "_cur_img_w")    else BASE_W
+        img_h    = self._cur_img_h    if hasattr(self, "_cur_img_h")    else BASE_H
+        canvas_w = self._cur_canvas_w if hasattr(self, "_cur_canvas_w") else BASE_W
+        canvas_h = self._cur_canvas_h if hasattr(self, "_cur_canvas_h") else BASE_H
 
         scaled = self.base_pixbuf.scale_simple(
-            w, h, GdkPixbuf.InterpType.NEAREST)
+            img_w, img_h, GdkPixbuf.InterpType.NEAREST)
+
+        # Centre of the canvas — this is where we anchor all transforms
+        cx = canvas_w / 2
+        cy = canvas_h / 2
 
         cr.save()
 
-        # Spin handles its own rotation; for everything else apply facing flip
         if self.angle != 0.0:
-            cr.translate(w / 2, h / 2)
+            # Rotate around the canvas centre; image is drawn centred there too
+            cr.translate(cx, cy)
             cr.rotate(math.radians(self.angle))
-            cr.translate(-w / 2, -h / 2)
-        elif self.facing == -1:
-            # Mirror horizontally: flip around the vertical centre line
-            cr.translate(w, 0)
-            cr.scale(-1, 1)
+            cr.translate(-img_w / 2, -img_h / 2)
+        else:
+            # No rotation — image sits at canvas offset so it's still centred
+            offset_x = (canvas_w - img_w) // 2
+            offset_y = (canvas_h - img_h) // 2
+            cr.translate(offset_x, offset_y)
+            if self.facing == -1:
+                # Mirror horizontally around the image centre
+                cr.translate(img_w, 0)
+                cr.scale(-1, 1)
 
         Gdk.cairo_set_source_pixbuf(cr, scaled, 0, 0)
         cr.paint_with_alpha(self._die_alpha)
