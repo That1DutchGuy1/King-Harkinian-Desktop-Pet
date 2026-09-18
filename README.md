@@ -33,7 +33,7 @@ If you don't have `pygame`, the script falls back to `aplay` which ships with `a
 
 ## 📁 FILE STRUCTURE
 
-Make sure all of these are sitting in the **same directory** together, or the King won't show up and you'll have only yourself to blame motherfucker:
+All of these need to be sitting in the **same directory** together, or the King won't show up and you'll have only yourself to blame motherfucker:
 
 ```
 king_harkinian_pet.py
@@ -69,6 +69,9 @@ The script will silently skip any MP3s it can't find, so you won't get an error 
 ---
 
 ## 🎮️ HOW TO RUN
+
+Open the **king-pet** folder, aka the main directory, in your terminal.
+Then copy-paste this command and execute it:
 
 ```bash
 python3 king_harkinian_pet.py
@@ -222,6 +225,8 @@ Update the `Exec` path inside the file to match wherever you actually put the sc
 
 **Clipping fix** — Rotating animations used to clip the corners of the King's head off because the window wasn't big enough to hold the full diagonal of a rotated image. This was unacceptable. It has been fixed. The script now calculates the diagonal of the current (possibly squished) frame and sizes the canvas accordingly, then offsets the window position so the King appears to stay exactly where he should be. His crown is intact. As it should be. 👑
 
+**Performance optimization** — The King now takes up less of your CPU and uses the GPU more for drawing himself and the Dinner Machine onto your desktop! 
+
 ---
 
 ## 💬 Q & A
@@ -230,7 +235,7 @@ Update the `Exec` path inside the file to match wherever you actually put the sc
 > **A:** No. GTK desktop pets are a Linux thing. Get a real operating system. 😁
 
 > **Q: The King isn't making any sounds!**
-> **A:** Install `pygame` or make sure `aplay` is on your system. Also check that the MP3 files are in the same folder as the script. The King cannot speak if you don't give him his voice lines.
+> **A:** Install `pygame` or check if `aplay` is on your system. Also check that the MP3 files are in the same folder as the script. The King cannot speak if you don't give him his voice lines.
 
 > **Q: Can I add my own voice lines?**
 > **A:** Yes! Drop any MP3 into the script folder and add the filename to the `VOICE_LINES` list in `king_harkinian_pet.py`. The King will add it to his repertoire immediately. 🎙️
@@ -246,6 +251,9 @@ Update the `Exec` path inside the file to match wherever you actually put the sc
 
 > **Q: I get a bunch of pygame warnings in the terminal!**
 > **A:** You don't anymore. The script suppresses pygame's startup spam automatically. You're welcome.
+
+> **Q: Why is there a vending machine on the bottom right of my screen?**
+> **A:** Bro, that's the Dinner Machine, you idiot! Yes, it nabbed a random vending machine PNG from Google Images. So fucking what?
 
 > **Q: This is stupid.**
 > **A:** Correct. 🙃
