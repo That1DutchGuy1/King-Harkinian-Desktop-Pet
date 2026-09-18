@@ -317,6 +317,7 @@ class KingPet:
         self.food_win.connect("button-press-event", self._on_food_click)
         self.food_win.connect("motion-notify-event", self._on_food_motion)
 
+        self._food_canvas_size = FOOD_DISPLAY_SIZE
         self.food_win.resize(FOOD_DISPLAY_SIZE, FOOD_DISPLAY_SIZE)
         # Don't show yet — shown when dragging starts
 
@@ -332,12 +333,19 @@ class KingPet:
                 sx = 1.0 + 0.18 * math.sin(t * 0.8)
                 sy = 1.0 - 0.18 * math.sin(t * 0.8)
                 ang = 15 * math.sin(t * 0.6)
-                cx = FOOD_DISPLAY_SIZE / 2
-                cy = FOOD_DISPLAY_SIZE / 2
+                # Canvas is sized to the diagonal (see _tick_eat_sequence), so
+                # anchor transforms around the canvas centre, not the image corner
+                cx = self._food_canvas_size / 2
+                cy = self._food_canvas_size / 2
                 cr.translate(cx, cy)
                 cr.rotate(math.radians(ang))
                 cr.scale(sx, sy)
-                cr.translate(-cx, -cy)
+                # Draw image centred on the canvas centre
+                cr.translate(-FOOD_DISPLAY_SIZE / 2, -FOOD_DISPLAY_SIZE / 2)
+            else:
+                # Static (placed / dragging) — image fills the window exactly
+                cr.translate(self._food_canvas_size / 2 - FOOD_DISPLAY_SIZE / 2,
+                             self._food_canvas_size / 2 - FOOD_DISPLAY_SIZE / 2)
             Gdk.cairo_set_source_pixbuf(cr, self._food_pixbuf, 0, 0)
             cr.paint_with_alpha(self._food_alpha if hasattr(self, "_food_alpha") else 1.0)
         return False
@@ -494,6 +502,14 @@ class KingPet:
                 self._eat_phase = "eat"
                 self._eat_tick  = 0
                 self._eat_food_devour = 0
+                # Expand food window to diagonal so rotation never clips corners
+                diag = math.ceil(math.hypot(FOOD_DISPLAY_SIZE, FOOD_DISPLAY_SIZE))
+                self._food_canvas_size = diag
+                # Recentre window so the food image stays in the same visual spot
+                offset = (diag - FOOD_DISPLAY_SIZE) // 2
+                self.food_win.resize(diag, diag)
+                self.food_win.move(int(self._food_x) - offset,
+                                   int(self._food_y) - offset)
                 # Start eating sound (blocking; triggers burp on finish)
                 self._play_sfx_blocking(EATING_SFX, self._on_eating_done)
 
@@ -527,6 +543,9 @@ class KingPet:
 
     def _on_eating_done(self):
         """Callback when eating.mp3 finishes — hide food, play burp."""
+        # Restore food window to normal size before hiding
+        self._food_canvas_size = FOOD_DISPLAY_SIZE
+        self.food_win.resize(FOOD_DISPLAY_SIZE, FOOD_DISPLAY_SIZE)
         self.food_win.hide()
         self._eat_phase = "eat_done"  # signal to switch phase after burp starts
         self._play_sfx_blocking(BURP_SFX, self._on_burp_done)
