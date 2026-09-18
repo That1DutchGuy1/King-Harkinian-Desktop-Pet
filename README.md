@@ -163,12 +163,13 @@ The food choices are:
 
 1. **Pizza**
 2. **Panini**
-3. **A Happy Meal**
-4. **Chicken Bucket**
+3. **Happy Meal**
+4. **Chicken bucket**
 5. **Cheesecake**
-6. **An ice cream cone**
-7. **A taco**
-8. **A BIG burger**
+6. **Ice cream cone**
+7. **Taco**
+8. **Burger**
+9. **Spaghetti**
 
 **The King always faces the food correctly.** If the food is to his left, he mirrors to face left. If it's to his right, he faces right. He has spatial awareness. More than you, probably. 👑
 
