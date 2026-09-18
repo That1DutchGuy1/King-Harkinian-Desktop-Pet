@@ -159,7 +159,16 @@ Once the food is placed, the following chain of events will occur whether you wa
 5. **He burps.** Loudly. With his whole body. The King shudders with satisfaction.
 6. **He resumes his normal behaviour**, presumably thinking about his next meal.
 
-The food choices are: pizza, panini, happy meal, and a bucket of chicken. The machine picks randomly. You don't get a say. You never get a say. This is his kitchen now.
+The food choices are:
+
+1. **Pizza**
+2. **Panini**
+3. **A Happy Meal**
+4. **Chicken Bucket**
+5. **Cheesecake**
+6. **An ice cream cone**
+7. **A taco**
+8. **A BIG burger**
 
 **The King always faces the food correctly.** If the food is to his left, he mirrors to face left. If it's to his right, he faces right. He has spatial awareness. More than you, probably. 👑
 
