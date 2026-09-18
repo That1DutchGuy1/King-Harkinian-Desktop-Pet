@@ -73,6 +73,7 @@ FOOD_IMAGES = [
     os.path.join(SCRIPT_DIR, "ice-cream-cone.png"),
     os.path.join(SCRIPT_DIR, "taco.png"),
     os.path.join(SCRIPT_DIR, "burger.png"),
+    os.path.join(SCRIPT_DIR, "spaghetti.png"),
 ]
 # Only keep food images that actually exist
 FOOD_IMAGES = [f for f in FOOD_IMAGES if os.path.isfile(f)]
