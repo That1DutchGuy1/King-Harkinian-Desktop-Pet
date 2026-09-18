@@ -1,8 +1,8 @@
 [Desktop Entry]
-Version=1.0
+Version=1.4
 Type=Application
 Name=King Harkinian Pet
-Comment=The King roams your desktop! My dinner!
+Comment=The King roams your desktop and you have to feed him his dinner!
 Exec=python3 /home/YOUR_USERNAME/king_harkinian_pet.py
 Terminal=false
 Hidden=false

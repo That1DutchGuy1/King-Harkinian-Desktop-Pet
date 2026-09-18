@@ -94,6 +94,18 @@ class KingPet:
     def __init__(self):
         self.base_pixbuf = GdkPixbuf.Pixbuf.new_from_file(PNG_PATH)
 
+        # Scaled-pixbuf cache — updated only when size changes, not every frame
+        self._scaled_pixbuf = self.base_pixbuf
+        self._cached_img_w  = -1   # sentinel: force first rescale
+        self._cached_img_h  = -1
+
+        # Current render geometry (set by _render, read by _on_draw)
+        self._cur_img_w    = BASE_W
+        self._cur_img_h    = BASE_H
+        self._cur_canvas_w = BASE_W
+        self._cur_canvas_h = BASE_H
+        self._die_alpha    = 1.0
+
         # ── Window ────────────────────────────────────────────────────────────
         self.win = Gtk.Window(type=Gtk.WindowType.POPUP)
         self.win.set_decorated(False)
@@ -115,7 +127,6 @@ class KingPet:
 
         self.image_widget = Gtk.DrawingArea()
         self.win.add(self.image_widget)
-        self.image_widget.connect("draw", self._on_draw)
 
         # ── Desktop size ──────────────────────────────────────────────────────
         disp    = Gdk.Display.get_default()
@@ -149,7 +160,6 @@ class KingPet:
         # -- Death animation state
         self._dying     = False
         self._die_tick  = 0
-        self._die_alpha = 1.0
 
         # ── Audio state ───────────────────────────────────────────────────────
         self._audio_playing = False   # guard: don't overlap clips
@@ -170,6 +180,7 @@ class KingPet:
         self._saved_anim       = "walk" # restore after eating
         self._saved_vx         = SPEED
         self._saved_vy         = SPEED
+        self._food_alpha       = 1.0    # opacity of food window (fades out when eaten)
 
         self._pick_new_behaviour()
         self._build_tray()
@@ -352,7 +363,7 @@ class KingPet:
                 cr.translate(self._food_canvas_size / 2 - FOOD_DISPLAY_SIZE / 2,
                              self._food_canvas_size / 2 - FOOD_DISPLAY_SIZE / 2)
             Gdk.cairo_set_source_pixbuf(cr, self._food_pixbuf, 0, 0)
-            cr.paint_with_alpha(self._food_alpha if hasattr(self, "_food_alpha") else 1.0)
+            cr.paint_with_alpha(self._food_alpha)
         return False
 
     def _on_food_motion(self, widget, event):
@@ -960,6 +971,14 @@ class KingPet:
         img_w = max(10, int(BASE_W * abs(self.squish_x)))
         img_h = max(10, int(BASE_H * abs(self.squish_y)))
 
+        # Only rescale when the size actually changed — avoids a full CPU pixbuf
+        # scale operation every single frame (the old hottest path in profiling).
+        if img_w != self._cached_img_w or img_h != self._cached_img_h:
+            self._scaled_pixbuf = self.base_pixbuf.scale_simple(
+                img_w, img_h, GdkPixbuf.InterpType.NEAREST)
+            self._cached_img_w = img_w
+            self._cached_img_h = img_h
+
         # If we're rotating, the window must be big enough to hold the full
         # diagonal so no corners get clipped.  We use the diagonal of the
         # *current* (possibly squished) image as the canvas size and centre
@@ -993,13 +1012,12 @@ class KingPet:
         cr.paint()
         cr.set_operator(2)  # OVER
 
-        img_w    = self._cur_img_w    if hasattr(self, "_cur_img_w")    else BASE_W
-        img_h    = self._cur_img_h    if hasattr(self, "_cur_img_h")    else BASE_H
-        canvas_w = self._cur_canvas_w if hasattr(self, "_cur_canvas_w") else BASE_W
-        canvas_h = self._cur_canvas_h if hasattr(self, "_cur_canvas_h") else BASE_H
+        img_w    = self._cur_img_w
+        img_h    = self._cur_img_h
+        canvas_w = self._cur_canvas_w
+        canvas_h = self._cur_canvas_h
 
-        scaled = self.base_pixbuf.scale_simple(
-            img_w, img_h, GdkPixbuf.InterpType.NEAREST)
+        scaled = self._scaled_pixbuf
 
         # Centre of the canvas — this is where we anchor all transforms
         cx = canvas_w / 2
