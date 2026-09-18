@@ -9,6 +9,7 @@
 ---
 
 A gloriously low-effort GTK desktop pet that plops the King himself right onto your Linux desktop. He roams around, squishes, spins, bounces, shakes, and randomly yells his iconic CD-i voice lines at you when you least expect it. Just like real royalty. 👑
+You also have to feed him with the food dispensed from the iconic Dinner Machine! Bro, if you haven't watched the iconic <a href="https://www.youtube.com/watch?v=5k6lu1ynsBk" target="_blank">"The King gets a Dinner Machine"</a> by Nin10Guy, then go fucking watch it, you uncultured swine!
 
 ---
 
@@ -52,7 +53,16 @@ ship-sails.mp3
 wonder-whats-for-dinner.mp3
 you-saved-me.mp3
 king-oh.mp3
+eating.mp3
+burp.mp3
+dinner-machine.png
+pizza.png
+panini.png
+happy-meal.png
+chicken-bucket.png
 ```
+
+The food images and dinner machine are optional — if they're not there, the Dinner Machine simply won't appear. The King will still roam your desktop like a normal unstable monarch.
 
 The script will silently skip any MP3s it can't find, so you won't get an error if you're missing some. You'll just get a less unhinged experience, which is your loss honestly.
 
@@ -75,6 +85,8 @@ That's it. The King appears. You're welcome, bitch.
 | **Left-click** the King | Forces him to speak immediately. Rude, but effective. |
 | **Right-click** the King | Kills him. He'll have something to say about it. |
 | **Tray icon** (right-click) | Toggle visibility, make him speak, or quit |
+| **Left-click** the Dinner Machine | Picks a random food and sticks it to your cursor. You are now responsible for feeding the King. |
+| **Left-click** to place food | Drops the food on the desktop. The King will handle the rest. He always handles dinner. |
 
 ---
 
@@ -130,6 +142,29 @@ And when you try to kill him? He gets the last word. `king-oh.mp3` plays in full
 
 ---
 
+## 🍕 THE DINNER MACHINE
+
+The King is hungry. He is always hungry. That is his entire personality and you will respect it.
+
+In the bottom-right corner of your screen, you'll find the **Dinner Machine** — a mysterious appliance of unknown origin that dispenses food directly onto your desktop. Left-click it and a random meal will attach itself to your cursor like a cursed gift. You are now the delivery guy. Congratulations on your new job.
+
+**Left-click anywhere on the desktop** to drop the food. Don't place it on top of the King — he's not ready yet and he will simply refuse, because royalty has standards about plating.
+
+Once the food is placed, the following chain of events will occur whether you want them to or not:
+
+1. **The King notices.** He plays a sound clip. He is very pleased.
+2. **He spins on the spot** to face the food — a full 360° rotation of pure regal anticipation.
+3. **He runs toward it** at approximately the speed of a man who has been told it's dinnertime. He wobbles. He stomps. He leans. It's undignified and perfect.
+4. **He eats it.** Chomping squish animation, food wobbling in protest, full eating sound effects. The meal doesn't stand a chance.
+5. **He burps.** Loudly. With his whole body. The King shudders with satisfaction.
+6. **He resumes his normal behaviour**, presumably thinking about his next meal.
+
+The food choices are: pizza, panini, happy meal, and a bucket of chicken. The machine picks randomly. You don't get a say. You never get a say. This is his kitchen now.
+
+**The King always faces the food correctly.** If the food is to his left, he mirrors to face left. If it's to his right, he faces right. He has spatial awareness. More than you, probably. 👑
+
+---
+
 ## 🚀 AUTOSTART (Optional)
 
 Want the King to bless your desktop every single time you log in? Of course you do.
@@ -170,6 +205,10 @@ Update the `Exec` path inside the file to match wherever you actually put the sc
 **9 new voice lines** — The King has more to say now. He always had more to say. You just weren't listening.
 
 **6 new animations** — tilt, stomp, panic, nod, moonwalk, vibrate, warp, chalice, flatline, dizzy, creep, glitch. That's twelve. Twelve. The man contains multitudes.
+
+**The Dinner Machine** — A mysterious food-dispensing appliance now lives in the bottom-right of your screen. Click it, get food, place food, watch the King sprint across your entire desktop to devour it and then burp at you. Full eat sequence with run animation, chomping squish, food wobble, eating SFX, and a burp that shakes his whole body. He then resumes roaming as if nothing happened. Because for him, nothing did. Dinner is not an event. Dinner is a lifestyle.
+
+**Facing fix for the eat sequence** — The King now correctly mirrors to face the food during the entire run animation, including while he's mid-wobble and mid-squish. Previously he'd always face right while running regardless of where the food actually was, which was embarrassing for everyone involved. Fixed. His spatial awareness is now fully restored. 👑
 
 **Clipping fix** — Rotating animations used to clip the corners of the King's head off because the window wasn't big enough to hold the full diagonal of a rotated image. This was unacceptable. It has been fixed. The script now calculates the diagonal of the current (possibly squished) frame and sizes the canvas accordingly, then offsets the window position so the King appears to stay exactly where he should be. His crown is intact. As it should be. 👑
 
