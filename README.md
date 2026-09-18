@@ -208,6 +208,8 @@ chmod +x ~/Desktop/king-harkinian-pet.desktop
 ```
 
 Update the `Exec` path inside the file to match wherever you actually put the script.
+Update the `Icon` path inside the file to wherever you left the King so that you can have a proper lil icon for his shortcut.
+I use the Documents folder myself, but you can change it to wherever the hell you want it to be.
 
 ---
 
