@@ -60,6 +60,21 @@ VOICE_LINES = [os.path.join(SCRIPT_DIR, f) for f in VOICE_LINES
                if os.path.isfile(os.path.join(SCRIPT_DIR, f))]
 
 GOODBYE_CLIP = os.path.join(SCRIPT_DIR, "king-oh.mp3")
+EATING_SFX   = os.path.join(SCRIPT_DIR, "eating.mp3")
+BURP_SFX     = os.path.join(SCRIPT_DIR, "burp.mp3")
+
+DINNER_MACHINE_PNG = os.path.join(SCRIPT_DIR, "dinner-machine.png")
+FOOD_IMAGES = [
+    os.path.join(SCRIPT_DIR, "pizza.png"),
+    os.path.join(SCRIPT_DIR, "panini.png"),
+    os.path.join(SCRIPT_DIR, "happy-meal.png"),
+    os.path.join(SCRIPT_DIR, "chicken-bucket.png"),
+]
+# Only keep food images that actually exist
+FOOD_IMAGES = [f for f in FOOD_IMAGES if os.path.isfile(f)]
+
+FOOD_DISPLAY_SIZE = 180  # food shown at 180×180 when placed/dragged
+DINNER_MACHINE_SIZE = 200  # dinner machine display size
 
 BASE_W, BASE_H = 268, 230
 SPEED    = 3
@@ -135,8 +150,26 @@ class KingPet:
         self._audio_playing = False   # guard: don't overlap clips
         self._voice_counter = VOICE_CHECK_EVERY  # count down to first check
 
+        # ── Food / Dinner Machine state ───────────────────────────────────────
+        self._food_dragging    = False   # food currently bound to cursor?
+        self._food_pixbuf      = None    # pixbuf of food being dragged / placed
+        self._food_placed      = False   # food has been placed on desktop
+        self._food_x           = 0.0    # placed food top-left x
+        self._food_y           = 0.0    # placed food top-left y
+        self._eating           = False   # King is in eat sequence?
+        self._eat_phase        = ""      # "run" | "eat" | "burp"
+        self._eat_tick         = 0
+        self._eat_target_x     = 0.0    # x the King runs toward
+        self._eat_target_y     = 0.0
+        self._eat_food_devour  = 0      # wobble tick for food while being eaten
+        self._saved_anim       = "walk" # restore after eating
+        self._saved_vx         = SPEED
+        self._saved_vy         = SPEED
+
         self._pick_new_behaviour()
         self._build_tray()
+        self._build_dinner_machine()
+        self._build_food_window()
 
         self.win.resize(BASE_W, BASE_H)
         self.win.move(int(self.x), int(self.y))
@@ -197,6 +230,313 @@ class KingPet:
                 time.sleep(0.05)
         # aplay was Popen'd; it runs to completion on its own
         Gtk.main_quit()
+
+    # ── Dinner Machine ────────────────────────────────────────────────────────
+    def _build_dinner_machine(self):
+        """Create the always-on-top dinner machine window anchored bottom-right."""
+        if not os.path.isfile(DINNER_MACHINE_PNG):
+            self.dm_win = None
+            return
+
+        self.dm_pixbuf = GdkPixbuf.Pixbuf.new_from_file_at_size(
+            DINNER_MACHINE_PNG, DINNER_MACHINE_SIZE, DINNER_MACHINE_SIZE)
+
+        self.dm_win = Gtk.Window(type=Gtk.WindowType.POPUP)
+        self.dm_win.set_decorated(False)
+        self.dm_win.set_app_paintable(True)
+        self.dm_win.set_keep_above(True)
+        self.dm_win.set_skip_taskbar_hint(True)
+        self.dm_win.set_skip_pager_hint(True)
+        self.dm_win.set_accept_focus(False)
+
+        screen = self.dm_win.get_screen()
+        visual = screen.get_rgba_visual()
+        if visual:
+            self.dm_win.set_visual(visual)
+
+        self.dm_win.connect("draw", self._draw_dinner_machine)
+        self.dm_win.add_events(Gdk.EventMask.BUTTON_PRESS_MASK)
+        self.dm_win.connect("button-press-event", self._on_dinner_machine_click)
+
+        self.dm_win.resize(DINNER_MACHINE_SIZE, DINNER_MACHINE_SIZE)
+        # Place 40px from right, 60px from bottom (avoids taskbar)
+        dm_x = self.desk_w - DINNER_MACHINE_SIZE - 40
+        dm_y = self.desk_h - DINNER_MACHINE_SIZE - 60
+        self.dm_win.move(dm_x, dm_y)
+        self.dm_win.show_all()
+
+    def _draw_dinner_machine(self, widget, cr):
+        cr.set_source_rgba(0, 0, 0, 0)
+        cr.set_operator(1)   # CLEAR
+        cr.paint()
+        cr.set_operator(2)   # OVER
+        Gdk.cairo_set_source_pixbuf(cr, self.dm_pixbuf, 0, 0)
+        cr.paint()
+        return False
+
+    def _on_dinner_machine_click(self, widget, event):
+        """Left-click on the machine → pick a random food and bind it to cursor."""
+        if event.button != 1:
+            return
+        if self._food_dragging or self._food_placed or self._eating:
+            return  # already mid-sequence
+        if not FOOD_IMAGES:
+            return
+
+        food_path = random.choice(FOOD_IMAGES)
+        self.dm_win.get_window().set_cursor(
+            Gdk.Cursor.new_for_display(Gdk.Display.get_default(), Gdk.CursorType.BLANK_CURSOR))
+        self._food_pixbuf = GdkPixbuf.Pixbuf.new_from_file_at_size(
+            food_path, FOOD_DISPLAY_SIZE, FOOD_DISPLAY_SIZE)
+        self._food_dragging = True
+        self._food_drag_x = int(event.x_root) - FOOD_DISPLAY_SIZE // 2
+        self._food_drag_y = int(event.y_root) - FOOD_DISPLAY_SIZE // 2
+        self.food_win.move(self._food_drag_x, self._food_drag_y)
+        self.food_win.show_all()
+
+    # ── Food drag window ──────────────────────────────────────────────────────
+    def _build_food_window(self):
+        """Transparent window that follows the cursor while dragging food."""
+        self.food_win = Gtk.Window(type=Gtk.WindowType.POPUP)
+        self.food_win.set_decorated(False)
+        self.food_win.set_app_paintable(True)
+        self.food_win.set_keep_above(True)
+        self.food_win.set_skip_taskbar_hint(True)
+        self.food_win.set_skip_pager_hint(True)
+        self.food_win.set_accept_focus(False)
+
+        screen = self.food_win.get_screen()
+        visual = screen.get_rgba_visual()
+        if visual:
+            self.food_win.set_visual(visual)
+
+        self.food_win.connect("draw", self._draw_food_window)
+        self.food_win.add_events(
+            Gdk.EventMask.BUTTON_PRESS_MASK |
+            Gdk.EventMask.POINTER_MOTION_MASK)
+        self.food_win.connect("button-press-event", self._on_food_click)
+        self.food_win.connect("motion-notify-event", self._on_food_motion)
+
+        self.food_win.resize(FOOD_DISPLAY_SIZE, FOOD_DISPLAY_SIZE)
+        # Don't show yet — shown when dragging starts
+
+    def _draw_food_window(self, widget, cr):
+        cr.set_source_rgba(0, 0, 0, 0)
+        cr.set_operator(1)
+        cr.paint()
+        cr.set_operator(2)
+        if self._food_pixbuf:
+            # Wobble animation while being eaten
+            if self._eating and self._eat_phase == "eat":
+                t = self._eat_food_devour
+                sx = 1.0 + 0.18 * math.sin(t * 0.8)
+                sy = 1.0 - 0.18 * math.sin(t * 0.8)
+                ang = 15 * math.sin(t * 0.6)
+                cx = FOOD_DISPLAY_SIZE / 2
+                cy = FOOD_DISPLAY_SIZE / 2
+                cr.translate(cx, cy)
+                cr.rotate(math.radians(ang))
+                cr.scale(sx, sy)
+                cr.translate(-cx, -cy)
+            Gdk.cairo_set_source_pixbuf(cr, self._food_pixbuf, 0, 0)
+            cr.paint_with_alpha(self._food_alpha if hasattr(self, "_food_alpha") else 1.0)
+        return False
+
+    def _on_food_motion(self, widget, event):
+        if self._food_dragging:
+            self._food_drag_x = int(event.x_root) - FOOD_DISPLAY_SIZE // 2
+            self._food_drag_y = int(event.y_root) - FOOD_DISPLAY_SIZE // 2
+            self.food_win.move(self._food_drag_x, self._food_drag_y)
+
+    def _on_food_click(self, widget, event):
+        """Left-click while dragging → place food if not on the King."""
+        if event.button != 1 or not self._food_dragging:
+            return
+        fx = int(event.x_root) - FOOD_DISPLAY_SIZE // 2
+        fy = int(event.y_root) - FOOD_DISPLAY_SIZE // 2
+        # Collision check with King
+        king_rect = (int(self.x), int(self.y), BASE_W, BASE_H)
+        food_rect = (fx, fy, FOOD_DISPLAY_SIZE, FOOD_DISPLAY_SIZE)
+        if self._rects_overlap(king_rect, food_rect):
+            return  # Can't place on the King
+
+        # Place the food
+        self._food_dragging = False
+        self._food_placed   = True
+        self._food_x        = float(fx)
+        self._food_y        = float(fy)
+        self._food_alpha    = 1.0
+        self.food_win.move(fx, fy)
+        self.food_win.queue_draw()
+        # Restore cursor
+        if self.dm_win:
+            self.dm_win.get_window().set_cursor(None)
+
+        # Start the King's eat sequence
+        self._start_eat_sequence()
+
+    @staticmethod
+    def _rects_overlap(r1, r2):
+        x1, y1, w1, h1 = r1
+        x2, y2, w2, h2 = r2
+        return not (x1 + w1 <= x2 or x2 + w2 <= x1 or
+                    y1 + h1 <= y2 or y2 + h2 <= y1)
+
+    # ── Eat sequence ──────────────────────────────────────────────────────────
+    def _start_eat_sequence(self):
+        """king-oh.mp3, King flips toward food, runs to it, eats, burps."""
+        self._eating = True
+        self._eat_phase = "run"
+        self._eat_tick  = 0
+        self._eat_food_devour = 0
+        self._food_alpha = 1.0
+
+        # Save current behaviour
+        self._saved_anim = self.anim
+        self._saved_vx   = self.vx
+        self._saved_vy   = self.vy
+
+        # Play king-oh (non-blocking, doesn't block other audio)
+        self._play_sfx_nonblocking(GOODBYE_CLIP)
+
+        # Determine which side of the food to run to
+        food_cx = self._food_x + FOOD_DISPLAY_SIZE / 2
+        king_cx = self.x + BASE_W / 2
+        if king_cx < food_cx:
+            # King is left of food → run to left side, face right
+            self._eat_target_x = self._food_x - BASE_W + 20
+            self.facing = 1
+        else:
+            # King is right of food → run to right side, face left
+            self._eat_target_x = self._food_x + FOOD_DISPLAY_SIZE - 20
+            self.facing = -1
+        self._eat_target_y = self._food_y + FOOD_DISPLAY_SIZE / 2 - BASE_H / 2
+
+        # Clamp target to desktop
+        self._eat_target_x = max(0.0, min(float(self.desk_w - BASE_W), self._eat_target_x))
+        self._eat_target_y = max(0.0, min(float(self.desk_h - BASE_H), self._eat_target_y))
+
+    def _play_sfx_nonblocking(self, path):
+        """Play a sound effect without blocking the audio_playing guard."""
+        if not path or not os.path.isfile(path):
+            return
+        def _worker():
+            try:
+                if AUDIO == "pygame":
+                    sound = pygame.mixer.Sound(path)
+                    sound.play()
+                else:
+                    subprocess.Popen(["aplay", path],
+                                     stdout=subprocess.DEVNULL,
+                                     stderr=subprocess.DEVNULL)
+            except Exception:
+                pass
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _play_sfx_blocking(self, path, done_cb):
+        """Play a sound effect and call done_cb (via GLib.idle_add) when done."""
+        if not path or not os.path.isfile(path):
+            GLib.idle_add(done_cb)
+            return
+        def _worker():
+            try:
+                if AUDIO == "pygame":
+                    sound = pygame.mixer.Sound(path)
+                    ch = sound.play()
+                    import time
+                    while ch.get_busy():
+                        time.sleep(0.05)
+                else:
+                    subprocess.run(["aplay", path],
+                                   stdout=subprocess.DEVNULL,
+                                   stderr=subprocess.DEVNULL)
+            except Exception:
+                pass
+            GLib.idle_add(done_cb)
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _tick_eat_sequence(self):
+        """Called from _tick when self._eating is True."""
+        t = self._eat_tick
+        self._eat_tick += 1
+
+        if self._eat_phase == "run":
+            # Flip animation for first 15 ticks (spin in place)
+            if t < 15:
+                self.angle    = (t / 15.0) * 360 * (1 if self.facing == 1 else -1)
+                self.squish_x = 1.0
+                self.squish_y = 1.0
+                return
+
+            # Then run toward the food target
+            self.angle = 0.0
+            dx = self._eat_target_x - self.x
+            dy = self._eat_target_y - self.y
+            dist = math.hypot(dx, dy)
+
+            if dist > 6:
+                RUN_SPEED = 9
+                ratio = RUN_SPEED / dist
+                self.x += dx * ratio
+                self.y += dy * ratio
+                # Funny run animation — rapid stomp squish
+                run_t = t - 15
+                self.squish_x = 1.0 + 0.3 * math.sin(run_t * 0.7)
+                self.squish_y = 1.0 - 0.3 * math.sin(run_t * 0.7)
+                self.angle    = 10 * math.sin(run_t * 0.9)
+            else:
+                # Arrived at food
+                self.x = self._eat_target_x
+                self.y = self._eat_target_y
+                self.squish_x = 1.0
+                self.squish_y = 1.0
+                self.angle    = 0.0
+                self._eat_phase = "eat"
+                self._eat_tick  = 0
+                self._eat_food_devour = 0
+                # Start eating sound (blocking; triggers burp on finish)
+                self._play_sfx_blocking(EATING_SFX, self._on_eating_done)
+
+        elif self._eat_phase == "eat":
+            self._eat_food_devour += 1
+            # King chomping animation — rapid open-close squish
+            self.squish_x = 1.0 + 0.25 * math.sin(t * 1.1)
+            self.squish_y = 1.0 - 0.25 * math.sin(t * 1.1)
+            self.angle    = 5 * math.sin(t * 0.8)
+            self.food_win.queue_draw()
+
+        elif self._eat_phase == "burp":
+            # King shudders with satisfaction
+            if t < 30:
+                self.squish_x = 1.0 + 0.4 * math.sin(t * 0.5)
+                self.squish_y = 1.0 - 0.2 * math.sin(t * 0.5)
+                self.angle    = 15 * math.sin(t * 0.4)
+            else:
+                # All done — restore normal behaviour
+                self.squish_x   = 1.0
+                self.squish_y   = 1.0
+                self.angle      = 0.0
+                self._eating    = False
+                self._food_placed = False
+                self._food_pixbuf = None
+                self.food_win.hide()
+                self.anim = self._saved_anim
+                self.vx   = self._saved_vx
+                self.vy   = self._saved_vy
+                self._pick_new_behaviour()
+
+    def _on_eating_done(self):
+        """Callback when eating.mp3 finishes — hide food, play burp."""
+        self.food_win.hide()
+        self._eat_phase = "eat_done"  # signal to switch phase after burp starts
+        self._play_sfx_blocking(BURP_SFX, self._on_burp_done)
+        self._eat_phase = "burp"
+        self._eat_tick  = 0
+        return False  # GLib.idle_add must return False
+
+    def _on_burp_done(self):
+        """Called when burp finishes; _tick_eat_sequence handles the timer wind-down."""
+        return False
 
     def _quit(self, *_):
         """Trigger death animation; audio + actual quit fire at its end."""
@@ -297,6 +637,25 @@ class KingPet:
             return True
 
         self.tick += 1
+
+        # Update food drag position by polling the global pointer
+        if self._food_dragging:
+            disp = Gdk.Display.get_default()
+            seat = disp.get_default_seat()
+            ptr  = seat.get_pointer()
+            scr, px, py = ptr.get_position()
+            nx = px - FOOD_DISPLAY_SIZE // 2
+            ny = py - FOOD_DISPLAY_SIZE // 2
+            if nx != self._food_drag_x or ny != self._food_drag_y:
+                self._food_drag_x = nx
+                self._food_drag_y = ny
+                self.food_win.move(nx, ny)
+
+        if self._eating:
+            self._tick_eat_sequence()
+            self._render()
+            return True
+
         self.anim_timer -= 1
         if self.anim_timer <= 0:
             self._pick_new_behaviour()
@@ -625,8 +984,12 @@ class KingPet:
         cr.save()
 
         if self.angle != 0.0:
-            # Rotate around the canvas centre; image is drawn centred there too
+            # Rotate around the canvas centre; image is drawn centred there too.
+            # Apply horizontal flip (facing) before rotation so the King faces
+            # the right direction even while spinning / wobbling.
             cr.translate(cx, cy)
+            if self.facing == -1:
+                cr.scale(-1, 1)
             cr.rotate(math.radians(self.angle))
             cr.translate(-img_w / 2, -img_h / 2)
         else:
