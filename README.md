@@ -236,6 +236,9 @@ I use the Documents folder myself, but you can change it to wherever the hell yo
 > **Q: Does this work on Windows or Mac?**
 > **A:** No. GTK desktop pets are a Linux thing. Get a real operating system. 😁
 
+> **Q: Which distros is this compatible with?**
+> **A:** I dunno exactly. It works on my Linux Mint 22 Cinnamon machine. Go try it out and you'll see if the King hates you or not.
+
 > **Q: The King isn't making any sounds!**
 > **A:** Install `pygame` or check if `aplay` is on your system. Also check that the MP3 files are in the same folder as the script. The King cannot speak if you don't give him his voice lines.
 
