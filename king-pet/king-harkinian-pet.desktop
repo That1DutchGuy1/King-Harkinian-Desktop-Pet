@@ -4,6 +4,7 @@ Type=Application
 Name=King Harkinian Pet
 Comment=The King roams your desktop and you have to feed him his dinner!
 Exec=python3 /home/YOUR_USERNAME/Documents/King-Harkinian-Desktop-Pet/king_harkinian_pet.py
+Icon=/home/YOUR_USERNAME/Documents/King-Harkinian-Desktop-Pet/king-pet/King-Harkinian-CD-i.png
 Terminal=false
 Categories=Amusement;
 StartupNotify=false
