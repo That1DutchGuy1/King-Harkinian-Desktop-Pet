@@ -13,6 +13,12 @@ You also have to feed him with the food dispensed from the iconic Dinner Machine
 
 ---
 
+## DOWNLOAD
+
+[Download King Harkinian Desktop Pet (ZIP)](https://github.com)
+
+---
+
 ## 🚨 REQUIREMENTS
 
 Before you dare run this, make sure you have the necessary garbage installed:
