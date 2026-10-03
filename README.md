@@ -361,7 +361,7 @@ If you attached the icon file correctly, then the King will show up inside your 
 ## 🛠️ TESTED ON
 
 * **Linux Mint 22 Cinnamon** — works perfectly, obviously
-* Probably works on Ubuntu, Debian, and anything else GTK-friendly. I dunno, too lazy to test, now fuck off.
+* Probably works on Ubuntu, Debian, and anything else GTK-friendly. I dunno, too lazy to test, now fuck off!
 
 ---
 
