@@ -73,7 +73,7 @@ cheese.png
 fish-and-chips.png
 steak.png
 strawberry-cake.png
-salmong.png
+salmon.png
 hot-dog.png
 ```
 
@@ -352,6 +352,9 @@ If you attached the icon file correctly, then the King will show up inside your 
 
 > **Q: Why is he getting bigger?** \
 > **A:** That's because you keep feeding him, bozo!
+
+> **Q: Why is there blood on the bottom of my screen?** \
+> **A:** That's his blood, idiot. He probably exploded from eating too much food.
 
 > **Q: This is stupid.** \
 > **A:** Correct. 🙃
