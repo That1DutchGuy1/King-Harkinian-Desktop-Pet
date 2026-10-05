@@ -94,6 +94,7 @@ steak.png
 strawberry-cake.png
 salmon.png
 hot-dog.png
+french-fries.png
 shit.png
 Sponge.png
 shit.mp3
@@ -232,6 +233,7 @@ The food choices are:
 12. **Strawberry cake**
 13. **Grilled salmon**
 14. **Hot dog**
+15. **French fries**
 
 Want to add your own? Drop any 512×512 PNG into the script folder, add the filename to the `FOOD_IMAGES` list in `king_harkinian_pet.py`, assign a fat point value, and the King will devour it without complaint. He is not picky. He never was. He wonders what's for dinner and the answer is: whatever you give him.
 

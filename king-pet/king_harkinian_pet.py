@@ -117,8 +117,9 @@ FOOD_CATALOG = [
     ("fish-and-chips.png", 8),   # battered and fried
     ("steak.png",          11),  # prime cut bloat
     ("cheese.png",         7),   # dairy density
-    ("salmon.png",          2),   # grilled and lean — practically a diet food
-    ("hot-dog.png",         6), # classic, lol 
+    ("salmon.png",          2),  # grilled and lean — practically a diet food
+    ("hot-dog.png",         6),  # classic, lol
+    ("french-fries.png",    4),  # salty and crunchy
     ("strawberry-cake.png",15),  # THE MOST FATTENING ITEM — the big one
 ]
 
