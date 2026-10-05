@@ -174,6 +174,8 @@ class KingPet:
         self._cur_canvas_w = BASE_W
         self._cur_canvas_h = BASE_H
         self._die_alpha    = 1.0
+        self._last_window_size = (BASE_W, BASE_H)
+        self._last_window_position = None
 
         # ── Window ────────────────────────────────────────────────────────────
         self.win = Gtk.Window(type=Gtk.WindowType.POPUP)
@@ -456,6 +458,7 @@ class KingPet:
 
         self.win.resize(BASE_W, BASE_H)
         self.win.move(int(self.x), int(self.y))
+        self._last_window_position = (int(self.x), int(self.y))
         self.win.show_all()
 
         # Announce arrival — play Mah-Boi once immediately on launch
@@ -4056,15 +4059,6 @@ class KingPet:
         if self.y + eff_h > self.desk_h:  self.y = self.desk_h - eff_h; self.vy = -abs(self.vy)
 
     # ── Render ────────────────────────────────────────────────────────────────
-    def _stack_poop_stains_below_king(self):
-        king_window = self.win.get_window()
-        if king_window is None:
-            return
-        for stain in self._poop_stains:
-            stain_window = stain["win"].get_window()
-            if stain_window is not None:
-                stain_window.restack(king_window, False)
-
     def _render(self):
         img_w = max(10, int(BASE_W * abs(self.squish_x)))
         img_h = max(10, int(BASE_H * abs(self.squish_y)))
@@ -4096,13 +4090,20 @@ class KingPet:
         win_x = int(self.x) - offset_x
         win_y = int(self.y) - offset_y
 
-        self.win.resize(canvas_w, canvas_h)
-        self.win.move(win_x, win_y)
+        window_size = (canvas_w, canvas_h)
+        if window_size != self._last_window_size:
+            self.win.resize(canvas_w, canvas_h)
+            self._last_window_size = window_size
+
+        window_position = (win_x, win_y)
+        if window_position != self._last_window_position:
+            self.win.move(win_x, win_y)
+            self._last_window_position = window_position
+
         self._cur_img_w  = img_w
         self._cur_img_h  = img_h
         self._cur_canvas_w = canvas_w
         self._cur_canvas_h = canvas_h
-        self._stack_poop_stains_below_king()
         self.win.queue_draw()
 
     def _on_draw(self, widget, cr):
