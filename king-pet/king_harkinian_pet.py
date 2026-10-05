@@ -2,11 +2,13 @@
 """
 King Harkinian Desktop Pet
 - Made by That One Dutch Guy
+- Works on Linux Mint 22 Cinnamon X11, but I haven't tested on any other distros. 
 - Roams your desktop with low-quality funny animations
 - Plays random voice lines via pygame or aplay
 - Toggle on/off with the tray icon or right-click
 - Requires: python3-gi, gir1.2-gtk-3.0, gir1.2-gdkpixbuf-2.0
 - Optional (better audio): python3-pygame   OR   aplay (from alsa-utils, usually pre-installed)
+- Optional (Aggressive Mode): python3-wnck  OR  xdotool (for window management)
 """
 
 import gi
@@ -19,12 +21,33 @@ try:
 except Exception:
     HAS_INDICATOR = False
 
-from gi.repository import Gtk, Gdk, GdkPixbuf, GLib
+from gi.repository import Gtk, Gdk, GdkPixbuf, GLib, Gio
 import math
 import random
 import os
 import subprocess
 import threading
+import sys
+import time
+
+# ── Optional wnck for Aggressive Mode window detection ───────────────────────
+try:
+    gi.require_version("Wnck", "3.0")
+    from gi.repository import Wnck
+    HAS_WNCK = True
+except Exception:
+    HAS_WNCK = False
+
+# Fallback: check for xdotool (used when wnck is unavailable)
+def _has_xdotool():
+    try:
+        subprocess.run(["xdotool", "--version"],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return True
+    except FileNotFoundError:
+        return False
+
+HAS_XDOTOOL = not HAS_WNCK and _has_xdotool()
 
 # ── Audio backend (pygame preferred, falls back to aplay) ─────────────────────
 try:
@@ -68,6 +91,13 @@ HIT_SFX      = os.path.join(SCRIPT_DIR, "hit.mp3")
 FIST_PNG     = os.path.join(SCRIPT_DIR, "fist.png")
 PIECE_SFX    = os.path.join(SCRIPT_DIR, "piece-of-shit.mp3")
 EXPLODE_SFX  = os.path.join(SCRIPT_DIR, "explode.mp3")
+ENOUGH_SFX   = os.path.join(SCRIPT_DIR, "enough.mp3")
+LAUGH_SFX    = os.path.join(SCRIPT_DIR, "King-Harkinian-Laugh.mp3")
+HMM_SFX      = os.path.join(SCRIPT_DIR, "hmm.mp3")
+SHIT_PNG     = os.path.join(SCRIPT_DIR, "shit.png")
+SPONGE_PNG   = os.path.join(SCRIPT_DIR, "Sponge.png")
+SHIT_SFX     = os.path.join(SCRIPT_DIR, "shit.mp3")
+SPONGE_SCRUB_SFX = os.path.join(SCRIPT_DIR, "sponge-scrub.mp3")
 
 DINNER_MACHINE_PNG = os.path.join(SCRIPT_DIR, "dinner-machine.png")
 
@@ -275,6 +305,34 @@ class KingPet:
         self._food_alpha       = 1.0    # opacity of food window (fades out when eaten)
         self._food_scale       = 1.0    # shrink scale during eating (1.0 → 0.0)
 
+        # ── Desktop mess / Sponge Mode state ──────────────────────────────────
+        self._shitting_enabled    = True
+        self._defecation_due_at   = None
+        self._defecation_pending  = False
+        self._defecating          = False
+        self._defecation_tick     = 0
+        self._defecation_saved_anim = "walk"
+        self._defecation_saved_vx = SPEED
+        self._defecation_saved_vy = SPEED
+        self._defecation_saved_facing = 1
+        self._DEFECATION_TICKS    = 96
+        self._DEFECATION_OAH_INTERVAL = 30
+        self._POOP_SIZE           = 128
+        self._poop_stains         = []
+        self._sponge_mode         = False
+        self._sponge_pixbuf       = None
+        self._sponge_alpha_map    = None
+        self._SPONGE_SIZE         = 128
+        self._SPONGE_ALPHA_THR    = 30
+        self._SPONGE_ALPHA_STEP   = 32
+        self._SPONGE_STAMP_TICKS  = 6
+        self._sponge_stamp_tick   = 0
+        self._sponge_prev_x       = None
+        self._sponge_prev_y       = None
+        self._sponge_scrub_channel = None
+        self._sponge_scrub_sound   = None
+        self._sponge_scrub_proc    = None
+
         # ── Fat / Explode state ───────────────────────────────────────────────
         self._fat_points        = 0      # accumulated fat points across all meals
         self._fat_scale         = 1.0    # visual size multiplier from fatness (1.0 → up to ~1.8)
@@ -302,6 +360,72 @@ class KingPet:
         self._combo_visible  = False
         self._combo_airborne = False  # flips True on first hit, scores from 2nd onward
 
+        # ── Aggressive Mode state ─────────────────────────────────────────────
+        # The King periodically picks a closeable windowed window, marches to
+        # its X button, yells "Enough!", kicks it shut with hit.mp3, then
+        # laughs victoriously.
+        self._aggressive_mode       = False   # toggled from tray menu (off by default)
+        self._aggr_state            = "idle"  # "idle"|"walk"|"kick"|"laugh"
+        self._aggr_tick             = 0       # frame counter within current phase
+        self._aggr_target_x         = 0.0    # screen X of window X-button
+        self._aggr_target_y         = 0.0    # screen Y of window X-button
+        self._aggr_window_id        = None   # xid / wnck window being executed
+        self._aggr_cooldown         = 0      # ticks before next hunt (set to ~15 s on start/finish)
+        self._AGGR_COOLDOWN_TICKS   = 900    # 15 seconds at 60 fps
+        self._aggr_saved_anim       = "walk"
+        self._aggr_saved_vx         = SPEED
+        self._aggr_saved_vy         = SPEED
+        self._aggr_saved_facing     = 1
+        # Kick sub-phases: "approach" → "windup" → "boot" → "recover"
+        self._aggr_kick_phase       = "approach"
+        self._aggr_kick_tick        = 0
+        self._AGGR_WINDUP_TICKS     = 18    # king leans back
+        self._AGGR_BOOT_TICKS       = 10    # the actual boot
+        self._AGGR_RECOVER_TICKS    = 14    # settling
+
+        # Window-moved interruption state
+        # Tracks the last known position of the target's X button so we notice
+        # if the window is dragged while the King is marching toward it.
+        self._aggr_last_btn_x       = 0.0   # btn_x we saw last tick
+        self._aggr_last_btn_y       = 0.0   # btn_y we saw last tick
+        self._aggr_move_threshold   = 12    # px the button must travel to count as moved
+
+        # Indignation sub-state: played when the target window moves mid-walk
+        # _aggr_state becomes "indignant" for _AGGR_INDIGNANT_TICKS frames,
+        # then returns to "walk" toward the (updated) button position.
+        self._aggr_indignant_tick   = 0
+        self._AGGR_INDIGNANT_TICKS  = 38    # ~630 ms at 60 fps
+
+        # Tantrum tracking: how many times has the window moved "recently"?
+        # Each move increments the counter; it decays over time.
+        # When it exceeds _AGGR_TANTRUM_THRESHOLD the King throws a tantrum.
+        self._aggr_move_events      = 0     # recent move-event count
+        self._aggr_move_decay       = 0     # ticks until next decay tick
+        self._AGGR_MOVE_DECAY_TICKS = 90    # one decay every ~1.5 s
+        self._AGGR_TANTRUM_THRESHOLD= 4     # move-events before tantrum starts
+        self._aggr_tantrum_active   = False # currently in tantrum mode?
+        self._aggr_tantrum_tick     = 0     # frame counter within tantrum
+        # Tantrum spam: king-oah every 400 ms = every 25 ticks at 60 fps
+        self._AGGR_TANTRUM_OAH_INTERVAL = 25
+        self._AGGR_LAUGH_TICKS      = 150   # ~2.5 s of gloating
+
+        # Desktop-icon kick state. The randomized delay is measured in ticks
+        # and counts down while Aggressive Mode is active.
+        self._aggr_icon_cooldown    = random.randint(3600, 7200)
+        self._aggr_icon_path        = None
+        self._aggr_icon_x           = 0.0
+        self._aggr_icon_y           = 0.0
+        self._aggr_icon_king_x      = 0.0
+        self._aggr_icon_king_y      = 0.0
+        self._aggr_icon_side        = 1
+        self._aggr_icon_phase       = "walk"
+        self._aggr_icon_tick        = 0
+        self._AGGR_ICON_STARE_TICKS = 180   # 3 seconds at 60 fps
+        self._AGGR_ICON_WALK_SPEED  = 2.2
+        self._AGGR_ICON_ITEM_W      = 96
+        self._AGGR_ICON_ITEM_H      = 100
+        self._AGGR_ICON_GAP         = 8
+
         # ── Food particle system ──────────────────────────────────────────────
         # Each particle: [x, y, vx, vy, size, r, g, b, a, age, max_age, rot, rot_v]
         self._food_particles   = []
@@ -321,7 +445,12 @@ class KingPet:
         self._build_food_window()
         self._build_particle_window()
         self._build_hit_mode_button()
+        self._build_sponge_mode_button()
         self._build_fist_window()
+        self._build_sponge_window()
+        self.sponge_btn_win.set_sensitive(self._sponge_pixbuf is not None)
+        self.sponge_btn_win.set_visible(
+            self._shitting_enabled and self._sponge_pixbuf is not None)
         self._build_score_window()
 
         self.win.resize(BASE_W, BASE_H)
@@ -812,7 +941,7 @@ class KingPet:
 
     def _on_food_click(self, widget, event):
         """Left-click while dragging → place food if not on the King."""
-        if event.button != 1 or not self._food_dragging:
+        if event.button != 1 or not self._food_dragging or self._defecating:
             return
         fx = int(event.x_root) - FOOD_DISPLAY_SIZE // 2
         fy = int(event.y_root) - FOOD_DISPLAY_SIZE // 2
@@ -1040,9 +1169,127 @@ class KingPet:
 
     def _on_burp_done(self):
         """Called when burp finishes; check if King has eaten enough to explode."""
+        if self._shitting_enabled:
+            self._defecation_due_at = time.monotonic() + random.uniform(10.0, 30.0)
+            self._defecation_pending = True
         if self._fat_points >= FAT_EXPLODE_THRESHOLD and not self._explode_armed:
             self._explode_armed = True
             self._start_explode_sequence()
+        return False
+
+    def _clear_defecation_state(self):
+        """Cancel pending or active defecation without removing existing stains."""
+        if self._defecating:
+            self.anim = self._defecation_saved_anim
+            self.vx = self._defecation_saved_vx
+            self.vy = self._defecation_saved_vy
+            self.facing = self._defecation_saved_facing
+            self.angle = 0.0
+            self.squish_x = self._fat_scale
+            self.squish_y = self._fat_scale
+        self._defecation_pending = False
+        self._defecation_due_at = None
+        self._defecating = False
+        self._defecation_tick = 0
+
+    def _start_defecation(self):
+        """Begin the King's short, dramatic desktop defecation animation."""
+        if not self._shitting_enabled:
+            self._defecation_pending = False
+            self._defecation_due_at = None
+            return False
+        if not os.path.isfile(SHIT_PNG):
+            print(f"Cannot spawn desktop mess; missing image: {SHIT_PNG}",
+                  file=sys.stderr)
+            self._defecation_pending = False
+            self._defecation_due_at = None
+            return False
+
+        self._defecating = True
+        self._defecation_pending = False
+        self._defecation_due_at = None
+        self._defecation_tick = 0
+        self._defecation_saved_anim = self.anim
+        self._defecation_saved_vx = self.vx
+        self._defecation_saved_vy = self.vy
+        self._defecation_saved_facing = self.facing
+        self._stop_voice()
+        return True
+
+    def _tick_defecation(self):
+        """Play three dramatic OAHs, then leave a small desktop stain."""
+        t = self._defecation_tick
+        self._defecation_tick += 1
+        if t in (0, self._DEFECATION_OAH_INTERVAL,
+                 self._DEFECATION_OAH_INTERVAL * 2):
+            self._play_sfx_nonblocking(GOODBYE_CLIP)
+
+        squat = 0.5 + 0.5 * math.sin(t * 0.35)
+        self.squish_x = (1.0 + 0.16 * squat) * self._fat_scale
+        self.squish_y = (1.0 - 0.28 * squat) * self._fat_scale
+        self.angle = self.facing * (7 + 5 * math.sin(t * 0.22))
+        if t >= self._DEFECATION_TICKS:
+            self.squish_x = self._fat_scale
+            self.squish_y = self._fat_scale
+            self.angle = 0.0
+            self._spawn_poop_stain()
+            self._play_sfx_nonblocking(SHIT_SFX)
+            self._defecating = False
+            self.anim = self._defecation_saved_anim
+            self.vx = self._defecation_saved_vx
+            self.vy = self._defecation_saved_vy
+            self.facing = self._defecation_saved_facing
+
+    def _spawn_poop_stain(self):
+        """Create a fat-scaled transparent stain beneath the King."""
+        size = int(round(self._POOP_SIZE * min(self._fat_scale, 1.8)))
+        source = GdkPixbuf.Pixbuf.new_from_file(SHIT_PNG)
+        pixbuf = source.scale_simple(
+            size, size, GdkPixbuf.InterpType.BILINEAR)
+        pixels = bytearray(pixbuf.get_pixels())
+        alpha_map = self._build_alpha_map(pixbuf)
+        stain = {
+            "size": size,
+            "pixels": pixels,
+            "alpha": alpha_map,
+            "pixbuf": pixbuf,
+            "remaining": sum(1 for alpha in alpha_map
+                             if alpha > self._SPONGE_ALPHA_THR),
+            "x": max(0, min(self.desk_w - size,
+                            int(self.x + (BASE_W * self._fat_scale
+                                         - size) / 2))),
+            "y": max(0, min(self.desk_h - size,
+                            int(self.y + BASE_H * self._fat_scale
+                                - size / 2))),
+        }
+        win = Gtk.Window(type=Gtk.WindowType.POPUP)
+        win.set_decorated(False)
+        win.set_app_paintable(True)
+        win.set_skip_taskbar_hint(True)
+        win.set_skip_pager_hint(True)
+        win.set_accept_focus(False)
+        visual = win.get_screen().get_rgba_visual()
+        if visual:
+            win.set_visual(visual)
+        stain["win"] = win
+        win.connect("draw", self._draw_poop_stain, stain)
+        win.connect("realize", self._make_fist_click_through)
+        win.resize(size, size)
+        win.move(stain["x"], stain["y"])
+        win.show_all()
+        gdk_win = win.get_window()
+        king_window = self.win.get_window()
+        self._poop_stains.append(stain)
+        if gdk_win and king_window:
+            gdk_win.restack(king_window, False)
+
+    def _draw_poop_stain(self, widget, cr, stain):
+        cr.set_source_rgba(0, 0, 0, 0)
+        cr.set_operator(1)
+        cr.paint()
+        cr.set_operator(2)
+        Gdk.cairo_set_source_pixbuf(cr, stain["pixbuf"], 0, 0)
+        cr.paint()
         return False
 
     # ── Explode sequence ─────────────────────────────────────────────────────
@@ -1068,6 +1315,7 @@ class KingPet:
         self._explode_hidden   = False
         self._explode_walk_in  = False
         self._explode_recovery = False
+        self._clear_defecation_state()
         # Interrupt any other active state
         self._eating         = False
         self._hit_active     = False
@@ -1193,6 +1441,7 @@ class KingPet:
                 self._die_alpha        = 1.0
                 self._exploding        = False
                 self._explode_recovery = False
+                self._clear_defecation_state()
                 self.anim = self._saved_anim
                 self.vx   = self._saved_vx
                 self.vy   = self._saved_vy
@@ -1457,9 +1706,274 @@ class KingPet:
             return
         self._toggle_hit_mode()
 
+    def _build_sponge_mode_button(self):
+        self.sponge_btn_win = Gtk.Window(type=Gtk.WindowType.POPUP)
+        self.sponge_btn_win.set_decorated(False)
+        self.sponge_btn_win.set_app_paintable(True)
+        self.sponge_btn_win.set_keep_above(True)
+        self.sponge_btn_win.set_skip_taskbar_hint(True)
+        self.sponge_btn_win.set_skip_pager_hint(True)
+        self.sponge_btn_win.set_accept_focus(False)
+        visual = self.sponge_btn_win.get_screen().get_rgba_visual()
+        if visual:
+            self.sponge_btn_win.set_visual(visual)
+        self.sponge_btn_win.connect("draw", self._draw_sponge_button)
+        self.sponge_btn_win.add_events(Gdk.EventMask.BUTTON_PRESS_MASK |
+                                       Gdk.EventMask.ENTER_NOTIFY_MASK |
+                                       Gdk.EventMask.LEAVE_NOTIFY_MASK)
+        self.sponge_btn_win.connect("button-press-event",
+                                    self._on_sponge_button_click)
+        self.sponge_btn_win.connect("enter-notify-event",
+                                    self._on_sponge_button_enter)
+        self.sponge_btn_win.connect("leave-notify-event",
+                                    self._on_sponge_button_leave)
+        self._sponge_btn_hover = False
+        self.sponge_btn_win.resize(self._HIT_BTN_W, self._HIT_BTN_H)
+        hit_btn_y = self.desk_h - self._HIT_BTN_H - 60
+        self.sponge_btn_win.move(40, hit_btn_y - self._HIT_BTN_H - 10)
+        self.sponge_btn_win.show_all()
+
+    def _draw_sponge_button(self, widget, cr):
+        w, h, radius = self._HIT_BTN_W, self._HIT_BTN_H, 10
+        cr.set_source_rgba(0, 0, 0, 0)
+        cr.set_operator(1)
+        cr.paint()
+        cr.set_operator(2)
+
+        if self._sponge_mode:
+            pulse = 0.5 + 0.5 * math.sin(self.tick * 0.18)
+            cr.set_source_rgba(0.18, 0.48 + 0.24 * pulse, 0.12, 0.96)
+        elif self._sponge_btn_hover:
+            cr.set_source_rgba(0.38, 0.72, 0.24, 0.96)
+        else:
+            cr.set_source_rgba(0.22, 0.56, 0.14, 0.92)
+        cr.arc(radius, radius, radius, math.pi, 3 * math.pi / 2)
+        cr.arc(w - radius, radius, radius, 3 * math.pi / 2, 0)
+        cr.arc(w - radius, h - radius, radius, 0, math.pi / 2)
+        cr.arc(radius, h - radius, radius, math.pi / 2, math.pi)
+        cr.close_path()
+        cr.fill()
+
+        cr.set_source_rgba(0.75, 1.0, 0.55, 1.0)
+        cr.set_line_width(2)
+        cr.arc(radius, radius, radius, math.pi, 3 * math.pi / 2)
+        cr.arc(w - radius, radius, radius, 3 * math.pi / 2, 0)
+        cr.arc(w - radius, h - radius, radius, 0, math.pi / 2)
+        cr.arc(radius, h - radius, radius, math.pi / 2, math.pi)
+        cr.close_path()
+        cr.stroke()
+
+        cr.set_source_rgba(1, 1, 1, 1)
+        cr.select_font_face("Sans", 0, 1)
+        cr.set_font_size(14)
+        label = "STOP SPONGE" if self._sponge_mode else "SPONGE MODE"
+        extents = cr.text_extents(label)
+        cr.move_to((w - extents.width) / 2 - extents.x_bearing,
+                   (h - extents.height) / 2 - extents.y_bearing)
+        cr.show_text(label)
+        return False
+
+    def _on_sponge_button_enter(self, widget, event):
+        self._sponge_btn_hover = True
+        self.sponge_btn_win.queue_draw()
+
+    def _on_sponge_button_leave(self, widget, event):
+        self._sponge_btn_hover = False
+        self.sponge_btn_win.queue_draw()
+
+    def _on_sponge_button_click(self, widget, event):
+        if event.button == 1:
+            self._toggle_sponge_mode()
+
+    def _toggle_sponge_mode(self):
+        if not self._sponge_mode and self._hit_mode:
+            self._toggle_hit_mode()
+        self._sponge_mode = not self._sponge_mode
+        self._sponge_prev_x = None
+        self._sponge_prev_y = None
+        self._sponge_stamp_tick = 0
+        if self._sponge_mode:
+            if self._tickle_active or self._tickle_recovery:
+                self._tickle_active = False
+                self._tickle_recovery = False
+                self.anim = self._saved_anim_tickle
+                self.vx = self._saved_vx_tickle
+                self.vy = self._saved_vy_tickle
+                self.angle = 0.0
+                self.squish_x = self._fat_scale
+                self.squish_y = self._fat_scale
+            self._last_cursor_x = -9999.0
+            self._last_cursor_y = -9999.0
+            self._cursor_vx_prev = 0.0
+            self._cursor_reversals = 0
+            self._reversal_decay = 0
+            self._sponge_win.show_all()
+        else:
+            self._sponge_win.hide()
+            self._stop_sponge_scrub()
+        self.sponge_btn_win.queue_draw()
+
+    def _build_sponge_window(self):
+        if not os.path.isfile(SPONGE_PNG):
+            print(f"Sponge Mode unavailable; missing image: {SPONGE_PNG}",
+                  file=sys.stderr)
+            self._sponge_win = Gtk.Window(type=Gtk.WindowType.POPUP)
+            self._sponge_win.set_decorated(False)
+            self._sponge_win.set_accept_focus(False)
+            return
+
+        source = GdkPixbuf.Pixbuf.new_from_file(SPONGE_PNG)
+        self._sponge_pixbuf = source.scale_simple(
+            self._SPONGE_SIZE, self._SPONGE_SIZE,
+            GdkPixbuf.InterpType.BILINEAR)
+        self._sponge_alpha_map = self._build_alpha_map(self._sponge_pixbuf)
+        self._sponge_win = Gtk.Window(type=Gtk.WindowType.POPUP)
+        self._sponge_win.set_decorated(False)
+        self._sponge_win.set_app_paintable(True)
+        self._sponge_win.set_keep_above(True)
+        self._sponge_win.set_skip_taskbar_hint(True)
+        self._sponge_win.set_skip_pager_hint(True)
+        self._sponge_win.set_accept_focus(False)
+        visual = self._sponge_win.get_screen().get_rgba_visual()
+        if visual:
+            self._sponge_win.set_visual(visual)
+        self._sponge_win.connect("draw", self._draw_sponge_cursor)
+        self._sponge_win.connect("realize", self._make_fist_click_through)
+        self._sponge_win.resize(self._SPONGE_SIZE, self._SPONGE_SIZE)
+
+    def _draw_sponge_cursor(self, widget, cr):
+        cr.set_source_rgba(0, 0, 0, 0)
+        cr.set_operator(1)
+        cr.paint()
+        cr.set_operator(2)
+        if self._sponge_pixbuf is not None:
+            Gdk.cairo_set_source_pixbuf(cr, self._sponge_pixbuf, 0, 0)
+            cr.paint()
+        return False
+
+    def _update_sponge_cursor(self, cx, cy):
+        if not self._sponge_mode or self._sponge_alpha_map is None:
+            self._stop_sponge_scrub()
+            return
+
+        if self._cursor_over_hit_button(cx, cy):
+            self._sponge_win.hide()
+            self._sponge_prev_x = cx
+            self._sponge_prev_y = cy
+            self._stop_sponge_scrub()
+            return
+
+        self._sponge_win.move(int(cx - self._SPONGE_SIZE / 2),
+                              int(cy - self._SPONGE_SIZE / 2))
+        if not self._sponge_win.get_visible():
+            self._sponge_win.show_all()
+
+        if self._sponge_prev_x is None or self._sponge_prev_y is None:
+            self._sponge_prev_x = cx
+            self._sponge_prev_y = cy
+            return
+
+        moving = math.hypot(cx - self._sponge_prev_x,
+                            cy - self._sponge_prev_y) >= 2.0
+        self._sponge_prev_x = cx
+        self._sponge_prev_y = cy
+        scrubbed = moving and self._scrub_poop_at_cursor(cx, cy)
+        if scrubbed:
+            self._start_sponge_scrub()
+        else:
+            self._stop_sponge_scrub()
+
+    def _scrub_poop_at_cursor(self, cx, cy):
+        if self._sponge_alpha_map is None:
+            return False
+        cursor_left = int(cx - self._SPONGE_SIZE / 2)
+        cursor_top = int(cy - self._SPONGE_SIZE / 2)
+        changed = False
+        remaining_stains = []
+        for stain in self._poop_stains:
+            left = int(stain["x"])
+            top = int(stain["y"])
+            stain_size = int(stain["size"])
+            min_x = max(0, left - cursor_left)
+            max_x = min(self._SPONGE_SIZE,
+                        left + stain_size - cursor_left)
+            min_y = max(0, top - cursor_top)
+            max_y = min(self._SPONGE_SIZE,
+                        top + stain_size - cursor_top)
+            stamp = self._sponge_stamp_tick % self._SPONGE_STAMP_TICKS == 0
+            stain_changed = False
+            for sponge_y in range(min_y, max_y):
+                poop_y = cursor_top + sponge_y - top
+                for sponge_x in range(min_x, max_x):
+                    sponge_index = sponge_y * self._SPONGE_SIZE + sponge_x
+                    if self._sponge_alpha_map[sponge_index] <= self._SPONGE_ALPHA_THR:
+                        continue
+                    poop_x = cursor_left + sponge_x - left
+                    poop_index = poop_y * stain_size + poop_x
+                    alpha = stain["alpha"][poop_index]
+                    if alpha <= self._SPONGE_ALPHA_THR:
+                        continue
+                    changed = True
+                    stain_changed = True
+                    if stamp:
+                        new_alpha = max(0, alpha - self._SPONGE_ALPHA_STEP)
+                        stain["alpha"][poop_index] = new_alpha
+                        pixel_index = (poop_y * stain_size + poop_x) * 4 + 3
+                        stain["pixels"][pixel_index] = new_alpha
+                        if new_alpha <= self._SPONGE_ALPHA_THR:
+                            stain["remaining"] -= 1
+
+            if stain["remaining"] <= 0:
+                stain["win"].destroy()
+                continue
+            if stain_changed and stamp:
+                stain["pixbuf"] = GdkPixbuf.Pixbuf.new_from_bytes(
+                    GLib.Bytes.new(bytes(stain["pixels"])),
+                    GdkPixbuf.Colorspace.RGB, True, 8,
+                    stain_size, stain_size, stain_size * 4)
+                stain["win"].queue_draw()
+            remaining_stains.append(stain)
+
+        self._poop_stains = remaining_stains
+        if changed:
+            self._sponge_stamp_tick += 1
+        return changed
+
+    def _start_sponge_scrub(self):
+        if AUDIO == "pygame":
+            if self._sponge_scrub_channel is None or not self._sponge_scrub_channel.get_busy():
+                try:
+                    if self._sponge_scrub_sound is None:
+                        self._sponge_scrub_sound = pygame.mixer.Sound(SPONGE_SCRUB_SFX)
+                    self._sponge_scrub_channel = pygame.mixer.find_channel(True)
+                    if self._sponge_scrub_channel:
+                        self._sponge_scrub_channel.play(self._sponge_scrub_sound, loops=-1)
+                except pygame.error as exc:
+                    print(f"Could not play sponge scrub audio: {exc}", file=sys.stderr)
+        elif self._sponge_scrub_proc is None or self._sponge_scrub_proc.poll() is not None:
+            try:
+                self._sponge_scrub_proc = subprocess.Popen(
+                    ["aplay", SPONGE_SCRUB_SFX],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL)
+            except OSError as exc:
+                print(f"Could not play sponge scrub audio: {exc}", file=sys.stderr)
+
+    def _stop_sponge_scrub(self):
+        if self._sponge_scrub_channel is not None:
+            self._sponge_scrub_channel.stop()
+            self._sponge_scrub_channel = None
+        proc = self._sponge_scrub_proc
+        if proc is not None:
+            if proc.poll() is None:
+                proc.terminate()
+            self._sponge_scrub_proc = None
+
     def _toggle_hit_mode(self):
         self._hit_mode = not self._hit_mode
         if self._hit_mode:
+            if self._sponge_mode:
+                self._toggle_sponge_mode()
             # Disable dinner machine visually (hide it)
             if self.dm_win:
                 self.dm_win.hide()
@@ -1590,11 +2104,14 @@ class KingPet:
         self._update_fist(cx, cy, hit_detect=True)
 
     def _cursor_over_hit_button(self, cx, cy):
-        """Return True if (cx, cy) is within the Hit Mode button bounds."""
+        """Return True if the cursor is over either mode button."""
         bx = 40
-        by = self.desk_h - self._HIT_BTN_H - 60
-        return (bx <= cx <= bx + self._HIT_BTN_W and
-                by <= cy <= by + self._HIT_BTN_H)
+        hit_y = self.desk_h - self._HIT_BTN_H - 60
+        sponge_y = hit_y - self._HIT_BTN_H - 10
+        over_x = bx <= cx <= bx + self._HIT_BTN_W
+        return over_x and (
+            hit_y <= cy <= hit_y + self._HIT_BTN_H or
+            sponge_y <= cy <= sponge_y + self._HIT_BTN_H)
 
     def _update_fist(self, cx, cy, hit_detect=True):
         """Move fist to cursor, update rotation to face the King, detect swipe hits."""
@@ -1848,12 +2365,827 @@ class KingPet:
             self.vy   = self._saved_vy
             self._pick_new_behaviour()
 
+    # ── Aggressive Mode — window hunting ─────────────────────────────────────
+    def _aggr_pick_target(self):
+        """Return (xid, x_btn_x, x_btn_y) for a random closeable windowed window,
+        or None if no suitable target exists.
+
+        "Closeable windowed" means: mapped, normal window type, NOT maximized,
+        NOT fullscreen, NOT minimized, NOT our own pet windows.
+        The X button is estimated at the top-right of the window frame minus a
+        small inset (~18 px from right edge, ~10 px from top edge).
+        """
+        our_xids = set()
+        for w in [self.win, self.food_win, self._particle_win,
+                  self._score_win, self.hit_btn_win, self.sponge_btn_win,
+                  self._fist_win, self._sponge_win]:
+            try:
+                gdkw = w.get_window()
+                if gdkw:
+                    our_xids.add(gdkw.get_xid())
+            except Exception:
+                pass
+        for stain in self._poop_stains:
+            gdkw = stain["win"].get_window()
+            if gdkw:
+                our_xids.add(gdkw.get_xid())
+        if self.dm_win:
+            try:
+                gdkw = self.dm_win.get_window()
+                if gdkw:
+                    our_xids.add(gdkw.get_xid())
+            except Exception:
+                pass
+
+        candidates = []
+
+        if HAS_WNCK:
+            screen = Wnck.Screen.get_default()
+            screen.force_update()
+            for win in screen.get_windows():
+                if win.get_xid() in our_xids:
+                    continue
+                if not win.is_visible_on_workspace(screen.get_active_workspace()):
+                    continue
+                state = win.get_state()
+                # Skip maximized, fullscreen, minimized
+                if state & (Wnck.WindowState.MAXIMIZED_HORIZONTALLY |
+                            Wnck.WindowState.MAXIMIZED_VERTICALLY |
+                            Wnck.WindowState.FULLSCREEN |
+                            Wnck.WindowState.MINIMIZED):
+                    continue
+                win_type = win.get_window_type()
+                if win_type not in (Wnck.WindowType.NORMAL,):
+                    continue
+                gx, gy, gw, gh = win.get_geometry()
+                # Estimate X-button position: top-right corner inset
+                btn_x = gx + gw - 18
+                btn_y = gy + 10
+                # Clamp to screen
+                btn_x = max(0, min(btn_x, self.desk_w - 1))
+                btn_y = max(0, min(btn_y, self.desk_h - 1))
+                candidates.append((win.get_xid(), btn_x, btn_y))
+
+        elif HAS_XDOTOOL:
+            try:
+                out = subprocess.check_output(
+                    ["xdotool", "search", "--onlyvisible", "--name", ""],
+                    stderr=subprocess.DEVNULL).decode().split()
+            except Exception:
+                out = []
+            for xid_str in out:
+                try:
+                    xid = int(xid_str)
+                except ValueError:
+                    continue
+                if xid in our_xids:
+                    continue
+                try:
+                    geo = subprocess.check_output(
+                        ["xdotool", "getwindowgeometry", "--shell", str(xid)],
+                        stderr=subprocess.DEVNULL).decode()
+                except Exception:
+                    continue
+                vals = {}
+                for line in geo.splitlines():
+                    if "=" in line:
+                        k, v = line.split("=", 1)
+                        vals[k.strip()] = v.strip()
+                try:
+                    gx = int(vals["X"])
+                    gy = int(vals["Y"])
+                    gw = int(vals["WIDTH"])
+                    gh = int(vals["HEIGHT"])
+                except (KeyError, ValueError):
+                    continue
+                # Skip maximized/fullscreen heuristic: window fills most of screen
+                if gw >= self.desk_w - 20 or gh >= self.desk_h - 60:
+                    continue
+                # Skip tiny panels / system trays
+                if gw < 100 or gh < 60:
+                    continue
+                btn_x = gx + gw - 18
+                btn_y = gy + 10
+                btn_x = max(0, min(btn_x, self.desk_w - 1))
+                btn_y = max(0, min(btn_y, self.desk_h - 1))
+                candidates.append((xid, btn_x, btn_y))
+
+        if not candidates:
+            return None
+        return random.choice(candidates)
+
+    def _aggr_close_window(self, xid):
+        """Close the target window using wnck or xdotool."""
+        if HAS_WNCK:
+            screen = Wnck.Screen.get_default()
+            screen.force_update()
+            for win in screen.get_windows():
+                if win.get_xid() == xid:
+                    win.close(0)
+                    return
+        elif HAS_XDOTOOL:
+            try:
+                subprocess.Popen(["xdotool", "windowclose", str(xid)],
+                                 stdout=subprocess.DEVNULL,
+                                 stderr=subprocess.DEVNULL)
+            except Exception:
+                pass
+
+    def _aggr_get_target_btn(self):
+        """Return (btn_x, btn_y) for self._aggr_window_id, or None if gone/lost."""
+        xid = self._aggr_window_id
+        if xid is None:
+            return None
+        if HAS_WNCK:
+            screen = Wnck.Screen.get_default()
+            screen.force_update()
+            for win in screen.get_windows():
+                if win.get_xid() == xid:
+                    gx, gy, gw, gh = win.get_geometry()
+                    btn_x = max(0, min(gx + gw - 18, self.desk_w - 1))
+                    btn_y = max(0, min(gy + 10,      self.desk_h - 1))
+                    return (float(btn_x), float(btn_y))
+            return None   # window vanished
+        elif HAS_XDOTOOL:
+            try:
+                geo = subprocess.check_output(
+                    ["xdotool", "getwindowgeometry", "--shell", str(xid)],
+                    stderr=subprocess.DEVNULL).decode()
+            except Exception:
+                return None
+            vals = {}
+            for line in geo.splitlines():
+                if "=" in line:
+                    k, v = line.split("=", 1)
+                    vals[k.strip()] = v.strip()
+            try:
+                gx = int(vals["X"]); gy = int(vals["Y"])
+                gw = int(vals["WIDTH"])
+                btn_x = max(0, min(gx + gw - 18, self.desk_w - 1))
+                btn_y = max(0, min(gy + 10,       self.desk_h - 1))
+                return (float(btn_x), float(btn_y))
+            except (KeyError, ValueError):
+                return None
+        return None
+
+    def _start_aggr_hunt(self):
+        """Pick a target and begin the walk-toward-X sequence."""
+        result = self._aggr_pick_target()
+        if result is None:
+            # No valid window found — try again after a shorter cooldown
+            self._aggr_cooldown = max(120, self._AGGR_COOLDOWN_TICKS // 3)
+            return
+
+        xid, btn_x, btn_y = result
+        self._aggr_window_id  = xid
+        self._aggr_target_x   = float(btn_x)
+        self._aggr_target_y   = float(btn_y)
+        self._aggr_state      = "walk"
+        self._aggr_tick       = 0
+        self._aggr_kick_phase = "approach"
+        self._aggr_kick_tick  = 0
+        # Initialise move-tracking for the new target
+        self._aggr_last_btn_x    = float(btn_x)
+        self._aggr_last_btn_y    = float(btn_y)
+        self._aggr_move_events   = 0
+        self._aggr_move_decay    = self._AGGR_MOVE_DECAY_TICKS
+        self._aggr_tantrum_active = False
+        self._aggr_tantrum_tick   = 0
+        self._aggr_indignant_tick = 0
+
+        # Save current normal state
+        self._aggr_saved_anim = self.anim
+        self._aggr_saved_vx   = self.vx
+        self._aggr_saved_vy   = self.vy
+
+        # Interrupt any non-critical state
+        self._eating         = False
+        self._tickle_active  = False
+        self._tickle_recovery = False
+
+    def _get_desktop_icons(self):
+        """Return launchable desktop shortcuts with their saved Nemo positions."""
+        try:
+            desktop_dir = subprocess.check_output(
+                ["xdg-user-dir", "DESKTOP"],
+                stderr=subprocess.DEVNULL,
+                text=True,
+                timeout=1).strip()
+        except (FileNotFoundError, subprocess.CalledProcessError,
+                subprocess.TimeoutExpired):
+            desktop_dir = os.path.join(os.path.expanduser("~"), "Desktop")
+
+        if not desktop_dir or not os.path.isdir(desktop_dir):
+            return []
+
+        try:
+            entries = sorted(
+                (entry for entry in os.scandir(desktop_dir)
+                 if not entry.name.startswith(".")
+                 and entry.name.lower().endswith(".desktop")
+                 and entry.is_file(follow_symlinks=True)),
+                key=lambda entry: entry.name.casefold())
+        except OSError as exc:
+            print(f"Could not read desktop shortcuts from {desktop_dir}: {exc}",
+                  file=sys.stderr)
+            return []
+
+        icons = []
+        for entry in entries:
+            app_info = Gio.DesktopAppInfo.new_from_filename(entry.path)
+            if app_info is None:
+                continue
+
+            desktop_file = Gio.File.new_for_path(entry.path)
+            try:
+                info = desktop_file.query_info(
+                    "metadata::nemo-icon-position",
+                    Gio.FileQueryInfoFlags.NONE,
+                    None)
+            except GLib.Error as exc:
+                print(f"Could not read Nemo position for {entry.path}: {exc}",
+                      file=sys.stderr)
+                continue
+            position = info.get_attribute_string("metadata::nemo-icon-position")
+            if not position:
+                continue
+            try:
+                icon_x, icon_y = (int(value) for value in position.split(",", 1))
+            except ValueError:
+                print(f"Invalid Nemo icon position for {entry.path}: {position}",
+                      file=sys.stderr)
+                continue
+
+            icons.append((entry.path, float(icon_x), float(icon_y),
+                          app_info.get_name()))
+        return icons
+
+    def _aggr_fullscreen_window_present(self):
+        """Return whether a visible maximized/fullscreen window covers the desktop."""
+        if HAS_WNCK:
+            screen = Wnck.Screen.get_default()
+            screen.force_update()
+            workspace = screen.get_active_workspace()
+            blocking_states = (
+                Wnck.WindowState.MAXIMIZED_HORIZONTALLY |
+                Wnck.WindowState.MAXIMIZED_VERTICALLY |
+                Wnck.WindowState.FULLSCREEN)
+            for window in screen.get_windows():
+                if not window.is_visible_on_workspace(workspace):
+                    continue
+                if window.get_state() & blocking_states:
+                    return True
+            return False
+
+        if not HAS_XDOTOOL:
+            return False
+        try:
+            window_ids = subprocess.check_output(
+                ["xdotool", "search", "--onlyvisible", "--name", ""],
+                stderr=subprocess.DEVNULL, timeout=1).decode().split()
+        except subprocess.CalledProcessError:
+            return False
+        except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
+            print(f"Could not check for fullscreen windows: {exc}",
+                  file=sys.stderr)
+            return True
+
+        for window_id in window_ids:
+            try:
+                geometry = subprocess.check_output(
+                    ["xdotool", "getwindowgeometry", "--shell", window_id],
+                    stderr=subprocess.DEVNULL, timeout=1).decode()
+            except subprocess.CalledProcessError:
+                continue
+            except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
+                print(f"Could not check window {window_id} geometry: {exc}",
+                      file=sys.stderr)
+                return True
+            values = {}
+            for line in geometry.splitlines():
+                if "=" in line:
+                    key, value = line.split("=", 1)
+                    values[key.strip()] = value.strip()
+            try:
+                width = int(values["WIDTH"])
+                height = int(values["HEIGHT"])
+            except (KeyError, ValueError):
+                continue
+            if (width >= self.desk_w - 20
+                    and height >= self.desk_h - 60):
+                return True
+        return False
+
+    def _cancel_aggr_icon_kick(self):
+        """Abort an icon kick and restore the King's roaming state."""
+        self._aggr_state = "idle"
+        self._aggr_icon_cooldown = random.randint(1200, 2400)
+        self.squish_x = self._fat_scale
+        self.squish_y = self._fat_scale
+        self.angle = 0.0
+        self.anim = self._aggr_saved_anim
+        self.vx = self._aggr_saved_vx
+        self.vy = self._aggr_saved_vy
+        self.facing = self._aggr_saved_facing
+
+    def _start_aggr_icon_kick(self):
+        """Select a desktop shortcut and interrupt roaming for an icon kick."""
+        if self._aggr_fullscreen_window_present():
+            self._aggr_icon_cooldown = random.randint(1200, 2400)
+            return False
+        icons = self._get_desktop_icons()
+        if not icons:
+            self._aggr_icon_cooldown = random.randint(1200, 2400)
+            return False
+
+        weights = [
+            1.5 if "harkinian" in
+            f"{name} {os.path.basename(path)}".casefold() else 1.0
+            for path, _, _, name in icons
+        ]
+        (self._aggr_icon_path, self._aggr_icon_x, self._aggr_icon_y,
+         _) = random.choices(icons, weights=weights, k=1)[0]
+        king_w = BASE_W * self._fat_scale
+        king_h = BASE_H * self._fat_scale
+        icon_left = self._aggr_icon_x
+        icon_right = icon_left + self._AGGR_ICON_ITEM_W
+        icon_top = self._aggr_icon_y
+        icon_bottom = icon_top + self._AGGR_ICON_ITEM_H
+        icon_center_y = (icon_top + icon_bottom) / 2
+
+        approaches = []
+        for side in (-1, 1):
+            if side < 0:
+                target_x = icon_left - self._AGGR_ICON_GAP - king_w
+            else:
+                target_x = icon_right + self._AGGR_ICON_GAP
+            target_y = icon_center_y - king_h / 2
+            target_x = max(0.0, min(float(self.desk_w) - king_w, target_x))
+            target_y = max(0.0, min(float(self.desk_h) - king_h, target_y))
+
+            if side < 0:
+                clear_of_icon = target_x + king_w <= icon_left - self._AGGR_ICON_GAP
+            else:
+                clear_of_icon = target_x >= icon_right + self._AGGR_ICON_GAP
+            if clear_of_icon:
+                distance = math.hypot(target_x - self.x, target_y - self.y)
+                approaches.append((distance, side, target_x, target_y))
+
+        if approaches:
+            _, self._aggr_icon_side, self._aggr_icon_king_x, \
+                self._aggr_icon_king_y = min(approaches)
+        else:
+            # If the icon is flush to an edge, use the closest clamped side.
+            side = -1 if self.x + king_w / 2 <= icon_left + self._AGGR_ICON_ITEM_W / 2 else 1
+            self._aggr_icon_side = side
+            self._aggr_icon_king_x = max(
+                0.0, min(float(self.desk_w) - king_w,
+                         icon_left - king_w - self._AGGR_ICON_GAP
+                         if side < 0 else icon_right + self._AGGR_ICON_GAP))
+            self._aggr_icon_king_y = max(
+                0.0, min(float(self.desk_h) - king_h, icon_center_y - king_h / 2))
+        self._aggr_icon_cooldown = random.randint(3600, 7200)
+        self._aggr_icon_phase = "walk"
+        self._aggr_icon_tick = 0
+        self._aggr_state = "icon_kick"
+        self._aggr_saved_anim = self.anim
+        self._aggr_saved_vx = self.vx
+        self._aggr_saved_vy = self.vy
+        self._aggr_saved_facing = self.facing
+        self._eating = False
+        self._tickle_active = False
+        self._tickle_recovery = False
+        return True
+
+    def _launch_aggr_desktop_icon(self):
+        """Launch the selected shortcut using its desktop-entry definition."""
+        if not self._aggr_icon_path:
+            return
+        app_info = Gio.DesktopAppInfo.new_from_filename(self._aggr_icon_path)
+        if app_info is None:
+            print(f"Could not load desktop shortcut {self._aggr_icon_path}",
+                  file=sys.stderr)
+            return
+        try:
+            app_info.launch([], None)
+        except GLib.Error as exc:
+            print(f"Could not launch desktop shortcut "
+                  f"{self._aggr_icon_path}: {exc}", file=sys.stderr)
+
+    def _tick_aggr_icon_kick(self):
+        """Walk to, stare at, kick, and launch the selected desktop shortcut."""
+        t = self._aggr_icon_tick
+        self._aggr_icon_tick += 1
+        launch_tick = self._AGGR_BOOT_TICKS // 2
+        if (self.tick % 30 == 0
+                or (self._aggr_icon_phase == "boot" and t == launch_tick)):
+            if self._aggr_fullscreen_window_present():
+                self._cancel_aggr_icon_kick()
+                return
+
+        if self._aggr_icon_phase == "walk":
+            # Approach the nearest clear side using the King's fat-scaled size.
+            target_x = self._aggr_icon_king_x
+            target_y = self._aggr_icon_king_y
+            dx = target_x - self.x
+            dy = target_y - self.y
+            distance = math.hypot(dx, dy)
+            if abs(dx) > 2:
+                self.facing = 1 if dx > 0 else -1
+            if distance > self._AGGR_ICON_WALK_SPEED:
+                ratio = self._AGGR_ICON_WALK_SPEED / distance
+                self.x += dx * ratio
+                self.y += dy * ratio
+                self.squish_x = (1.0 + 0.08 * math.sin(t * 0.35)) * self._fat_scale
+                self.squish_y = (1.0 - 0.08 * math.sin(t * 0.35)) * self._fat_scale
+                self.angle = 4 * math.sin(t * 0.3)
+                return
+
+            self.x = target_x
+            self.y = target_y
+            self.facing = -self._aggr_icon_side
+            self.squish_x = self._fat_scale
+            self.squish_y = self._fat_scale
+            self.angle = 0.0
+            self._aggr_icon_phase = "stare"
+            self._aggr_icon_tick = 0
+            self._play_sfx_nonblocking(HMM_SFX)
+            return
+
+        if self._aggr_icon_phase == "stare":
+            if t >= self._AGGR_ICON_STARE_TICKS:
+                self._aggr_icon_phase = "windup"
+                self._aggr_icon_tick = 0
+            return
+
+        if self._aggr_icon_phase == "windup":
+            p = min(1.0, t / self._AGGR_WINDUP_TICKS)
+            lean = -30 * math.sin(p * math.pi)
+            self.angle = lean * self.facing
+            self.squish_x = (1.0 - 0.15 * math.sin(p * math.pi)) * self._fat_scale
+            self.squish_y = (1.0 + 0.20 * math.sin(p * math.pi)) * self._fat_scale
+            if t >= self._AGGR_WINDUP_TICKS:
+                self._aggr_icon_phase = "boot"
+                self._aggr_icon_tick = 0
+            return
+
+        if self._aggr_icon_phase == "boot":
+            p = min(1.0, t / self._AGGR_BOOT_TICKS)
+            self.angle = 55 * p * self.facing
+            self.squish_x = (1.0 + 0.5 * math.sin(p * math.pi)) * self._fat_scale
+            self.squish_y = (1.0 - 0.4 * math.sin(p * math.pi)) * self._fat_scale
+            self.x += self.facing * 12 * math.sin(p * math.pi)
+            self.x = max(0.0, min(float(self.desk_w - BASE_W), self.x))
+            if t == self._AGGR_BOOT_TICKS // 2:
+                self._play_sfx_nonblocking(HIT_SFX)
+                self._launch_aggr_desktop_icon()
+            if t >= self._AGGR_BOOT_TICKS:
+                self._aggr_icon_phase = "recover"
+                self._aggr_icon_tick = 0
+            return
+
+        if self._aggr_icon_phase == "recover":
+            p = min(1.0, t / self._AGGR_RECOVER_TICKS)
+            damp = (1.0 - p) ** 2
+            self.angle = 20 * math.sin(p * math.pi * 3) * damp * self.facing
+            self.squish_x = (1.0 + 0.12 * math.cos(p * math.pi * 4) * damp) * self._fat_scale
+            self.squish_y = (1.0 - 0.12 * math.cos(p * math.pi * 4) * damp) * self._fat_scale
+            if t >= self._AGGR_RECOVER_TICKS:
+                self._aggr_icon_phase = "laugh"
+                self._aggr_icon_tick = 0
+                self._stop_voice()
+                self._play_sfx_nonblocking(LAUGH_SFX)
+            return
+
+        if self._aggr_icon_phase == "laugh":
+            belly = math.sin((t % 30) / 30.0 * 2 * math.pi)
+            self.squish_x = (1.0 + 0.35 * max(0, belly)) * self._fat_scale
+            self.squish_y = (1.0 - 0.22 * max(0, belly)) * self._fat_scale
+            self.angle = -12 * math.sin(t * 0.12)
+            self.x -= self.facing * 0.8
+            self.x = max(0.0, min(float(self.desk_w - BASE_W), self.x))
+            if t >= self._AGGR_LAUGH_TICKS:
+                self.squish_x = self._fat_scale
+                self.squish_y = self._fat_scale
+                self.angle = 0.0
+                self._aggr_state = "idle"
+                self._aggr_cooldown = self._AGGR_COOLDOWN_TICKS
+                self.anim = self._aggr_saved_anim
+                self.vx = self._aggr_saved_vx
+                self.vy = self._aggr_saved_vy
+                self.facing = self._aggr_saved_facing
+
+    def _tick_aggressive(self):
+        """Called from _tick every frame when aggressive mode is active."""
+        if self._aggr_icon_cooldown > 0:
+            self._aggr_icon_cooldown -= 1
+
+        if self._aggr_state == "idle":
+            if self._aggr_icon_cooldown <= 0 and self._start_aggr_icon_kick():
+                return
+            if self._aggr_cooldown > 0:
+                self._aggr_cooldown -= 1
+            else:
+                self._start_aggr_hunt()
+
+        elif self._aggr_state == "icon_kick":
+            self._tick_aggr_icon_kick()
+
+        elif self._aggr_state == "walk":
+            self._tick_aggr_walk_with_tracking()
+
+        elif self._aggr_state == "indignant":
+            self._tick_aggr_indignant()
+
+        elif self._aggr_state == "kick":
+            self._tick_aggr_kick()
+
+        elif self._aggr_state == "laugh":
+            self._tick_aggr_laugh()
+
+    def _tick_aggr_walk_with_tracking(self):
+        """Wrapper around _tick_aggr_walk that also detects if the target window moved."""
+        # Decay the move-event counter over time so old moves fade out
+        self._aggr_move_decay -= 1
+        if self._aggr_move_decay <= 0:
+            self._aggr_move_decay = self._AGGR_MOVE_DECAY_TICKS
+            if self._aggr_move_events > 0:
+                self._aggr_move_events -= 1
+
+        # Poll the target window's current button position.
+        # We do this every ~10 ticks to avoid xdotool spam.
+        if self._aggr_tick % 10 == 0 and self._aggr_window_id is not None:
+            pos = self._aggr_get_target_btn()
+            if pos is None:
+                # Window disappeared while we were walking — abort, go idle
+                self._aggr_state    = "idle"
+                self._aggr_cooldown = self._AGGR_COOLDOWN_TICKS // 2
+                self.squish_x = self._fat_scale
+                self.squish_y = self._fat_scale
+                self.angle    = 0.0
+                return
+            new_bx, new_by = pos
+            moved = math.hypot(new_bx - self._aggr_last_btn_x,
+                               new_by - self._aggr_last_btn_y)
+            if moved >= self._aggr_move_threshold:
+                # Target window moved — update destination
+                self._aggr_target_x   = new_bx
+                self._aggr_target_y   = new_by
+                self._aggr_last_btn_x = new_bx
+                self._aggr_last_btn_y = new_by
+                self._aggr_move_events = min(
+                    self._aggr_move_events + 1, self._AGGR_TANTRUM_THRESHOLD + 2)
+
+                if self._aggr_move_events >= self._AGGR_TANTRUM_THRESHOLD:
+                    # Window keeps moving — enter/stay-in tantrum
+                    if not self._aggr_tantrum_active:
+                        self._aggr_tantrum_active = True
+                        self._aggr_tantrum_tick   = 0
+                        # Immediate first scream
+                        self._play_sfx_nonblocking(GOODBYE_CLIP)
+                else:
+                    # First or second move — brief indignant reaction then re-walk
+                    self._aggr_state          = "indignant"
+                    self._aggr_indignant_tick = 0
+                    self._play_sfx_nonblocking(GOODBYE_CLIP)
+                    return   # don't walk this tick
+            else:
+                self._aggr_last_btn_x = new_bx
+                self._aggr_last_btn_y = new_by
+
+        # Tantrum spam: while tantrum is active and we're still walking, spam OAH
+        if self._aggr_tantrum_active:
+            self._aggr_tantrum_tick += 1
+            if self._aggr_tantrum_tick % self._AGGR_TANTRUM_OAH_INTERVAL == 0:
+                self._play_sfx_nonblocking(GOODBYE_CLIP)
+            # Tantrum anim: shake harder while walking
+            t = self._aggr_tick
+            self.squish_x = (1.0 + 0.22 * math.sin(t * 0.75)) * self._fat_scale
+            self.squish_y = (1.0 - 0.22 * math.sin(t * 0.75)) * self._fat_scale
+            self.angle    = 14 * math.sin(t * 0.55)
+            # Still advance toward target (but do movement manually here)
+            target_king_x = max(0.0, min(float(self.desk_w - BASE_W),
+                                          self._aggr_target_x - BASE_W * 0.55))
+            target_king_y = max(0.0, min(float(self.desk_h - BASE_H),
+                                          self._aggr_target_y - BASE_H * 0.55))
+            dx = target_king_x - self.x
+            dy = target_king_y - self.y
+            dist = math.hypot(dx, dy)
+            if abs(dx) > 2:
+                self.facing = 1 if dx > 0 else -1
+            if dist > 8:
+                WALK_SPEED = 7
+                ratio = WALK_SPEED / dist
+                self.x += dx * ratio
+                self.y += dy * ratio
+            else:
+                # Arrived — transition to kick even in tantrum
+                self._aggr_tantrum_active = False
+                self.x = target_king_x
+                self.y = target_king_y
+                self.squish_x = self._fat_scale
+                self.squish_y = self._fat_scale
+                self.angle    = 0.0
+                self._aggr_state      = "kick"
+                self._aggr_tick       = 0
+                self._aggr_kick_phase = "windup"
+                self._aggr_kick_tick  = 0
+                self._stop_voice()
+                self._play_sfx_nonblocking(ENOUGH_SFX)
+            self._aggr_tick += 1
+            return
+
+        self._tick_aggr_walk()
+
+    def _tick_aggr_indignant(self):
+        """Brief indignant reaction when the target window is moved mid-walk.
+
+        The King huffs, plays king-oah.mp3, then resumes walking toward
+        the (now-updated) target position.
+        """
+        t = self._aggr_indignant_tick
+        self._aggr_indignant_tick += 1
+        p = t / self._AGGR_INDIGNANT_TICKS
+
+        # Quick angry shudder: lean + squish, peaks at mid-point then settles
+        if p < 0.35:
+            lp = p / 0.35
+            self.angle    = 25 * math.sin(lp * math.pi * 4) * (1.0 - lp * 0.5)
+            self.squish_x = (1.0 + 0.28 * math.sin(lp * math.pi * 5)) * self._fat_scale
+            self.squish_y = (1.0 - 0.20 * math.sin(lp * math.pi * 5)) * self._fat_scale
+        elif p < 0.70:
+            lp = (p - 0.35) / 0.35
+            # Puffed-up indignant stare (he's appalled)
+            scale = 1.0 + 0.20 * math.sin(lp * math.pi)
+            self.squish_x = scale * self._fat_scale
+            self.squish_y = (2.0 - scale) * self._fat_scale
+            self.angle    = 12 * math.sin(lp * math.pi * 3)
+        else:
+            lp = (p - 0.70) / 0.30
+            damp = (1.0 - lp) ** 2
+            self.angle    = 10 * math.sin(lp * math.pi * 2) * damp
+            self.squish_x = (1.0 + 0.08 * math.cos(lp * math.pi * 3) * damp) * self._fat_scale
+            self.squish_y = (1.0 - 0.08 * math.cos(lp * math.pi * 3) * damp) * self._fat_scale
+
+        if t >= self._AGGR_INDIGNANT_TICKS:
+            # Done huffing — resume walk toward the updated target
+            self.angle    = 0.0
+            self.squish_x = self._fat_scale
+            self.squish_y = self._fat_scale
+            self._aggr_state = "walk"
+            # Reset aggr_tick so the walk animation phase counter restarts cleanly
+            self._aggr_tick  = 0
+
+    def _tick_aggr_walk(self):
+        """Walk briskly toward the X button position."""
+        t = self._aggr_tick
+        self._aggr_tick += 1
+
+        # Target is the window's X button; King should arrive with his foot
+        # roughly there.  We aim for a spot slightly left/right of the button
+        # depending on which side the King is coming from.
+        target_king_x = self._aggr_target_x - BASE_W * 0.55
+        target_king_y = self._aggr_target_y - BASE_H * 0.55
+
+        # Clamp so King stays on screen
+        target_king_x = max(0.0, min(float(self.desk_w - BASE_W), target_king_x))
+        target_king_y = max(0.0, min(float(self.desk_h - BASE_H), target_king_y))
+
+        dx = target_king_x - self.x
+        dy = target_king_y - self.y
+        dist = math.hypot(dx, dy)
+
+        # Face toward target
+        if abs(dx) > 2:
+            self.facing = 1 if dx > 0 else -1
+
+        if dist > 8:
+            WALK_SPEED = 7
+            ratio = WALK_SPEED / dist
+            self.x += dx * ratio
+            self.y += dy * ratio
+            # Brisk marching squish
+            self.squish_x = (1.0 + 0.15 * math.sin(t * 0.55)) * self._fat_scale
+            self.squish_y = (1.0 - 0.15 * math.sin(t * 0.55)) * self._fat_scale
+            self.angle    = 8 * math.sin(t * 0.45)
+        else:
+            # Arrived — play "Enough!" and transition to kick
+            self.x = target_king_x
+            self.y = target_king_y
+            self.squish_x = self._fat_scale
+            self.squish_y = self._fat_scale
+            self.angle    = 0.0
+            self._aggr_state     = "kick"
+            self._aggr_tick      = 0
+            self._aggr_kick_phase = "windup"
+            self._aggr_kick_tick  = 0
+            self._stop_voice()
+            self._play_sfx_nonblocking(ENOUGH_SFX)
+
+    def _tick_aggr_kick(self):
+        """Kick animation: windup → boot (close window + hit.mp3) → recover."""
+        t = self._aggr_kick_tick
+        self._aggr_kick_tick += 1
+
+        phase = self._aggr_kick_phase
+
+        if phase == "windup":
+            # King leans dramatically backward like he's about to deliver justice
+            p = t / self._AGGR_WINDUP_TICKS
+            # Lean back (angle away from facing direction), scrunch down slightly
+            lean = -30 * math.sin(p * math.pi)           # arcs back then starts forward
+            self.angle    = lean * self.facing
+            self.squish_x = (1.0 - 0.15 * math.sin(p * math.pi)) * self._fat_scale
+            self.squish_y = (1.0 + 0.20 * math.sin(p * math.pi)) * self._fat_scale
+            if t >= self._AGGR_WINDUP_TICKS:
+                self._aggr_kick_phase = "boot"
+                self._aggr_kick_tick  = 0
+
+        elif phase == "boot":
+            # THE KICK — fast forward lunge, then snap
+            p = t / self._AGGR_BOOT_TICKS
+            # Lunge forward (toward target) with a snappy squish
+            kick_lean   = 55 * p * self.facing           # snaps hard forward
+            stretch_x   = 1.0 + 0.5 * math.sin(p * math.pi)
+            stretch_y   = 1.0 - 0.4 * math.sin(p * math.pi)
+            self.angle    = kick_lean
+            self.squish_x = stretch_x * self._fat_scale
+            self.squish_y = stretch_y * self._fat_scale
+            # Lunge the King forward a bit
+            self.x += self.facing * 12 * math.sin(p * math.pi)
+            self.x = max(0.0, min(float(self.desk_w - BASE_W), self.x))
+
+            if t == self._AGGR_BOOT_TICKS // 2:
+                # Impact frame — close the window and play hit.mp3
+                self._play_sfx_nonblocking(HIT_SFX)
+                if self._aggr_window_id is not None:
+                    # Run in a thread so the GTK loop isn't blocked
+                    xid = self._aggr_window_id
+                    threading.Thread(target=self._aggr_close_window,
+                                     args=(xid,), daemon=True).start()
+                    self._aggr_window_id = None
+
+            if t >= self._AGGR_BOOT_TICKS:
+                self._aggr_kick_phase = "recover"
+                self._aggr_kick_tick  = 0
+
+        elif phase == "recover":
+            # Spring back to upright with a smug little wobble
+            p = t / self._AGGR_RECOVER_TICKS
+            damp = (1.0 - p) ** 2
+            self.angle    = 20 * math.sin(p * math.pi * 3) * damp * self.facing
+            self.squish_x = (1.0 + 0.12 * math.cos(p * math.pi * 4) * damp) * self._fat_scale
+            self.squish_y = (1.0 - 0.12 * math.cos(p * math.pi * 4) * damp) * self._fat_scale
+            if t >= self._AGGR_RECOVER_TICKS:
+                self.angle    = 0.0
+                self.squish_x = self._fat_scale
+                self.squish_y = self._fat_scale
+                self._aggr_state = "laugh"
+                self._aggr_tick  = 0
+                # Play the laugh clip
+                self._stop_voice()
+                self._play_sfx_nonblocking(LAUGH_SFX)
+
+    def _tick_aggr_laugh(self):
+        """Victorious laugh animation — belly-wobble gloat."""
+        t = self._aggr_tick
+        self._aggr_tick += 1
+
+        # Laugh: rhythmic big belly shakes, occasional lean-back royalty energy
+        laugh_cycle = t % 30
+        p = laugh_cycle / 30.0
+        # Big belly bounce — wide and short on the "HA" beat
+        belly = math.sin(p * 2 * math.pi)
+        self.squish_x = (1.0 + 0.35 * max(0, belly)) * self._fat_scale
+        self.squish_y = (1.0 - 0.22 * max(0, belly)) * self._fat_scale
+        # Slight lean-back swagger
+        self.angle    = -12 * math.sin(t * 0.12)
+        # Drift backward slightly (away from the scene of the crime)
+        self.x -= self.facing * 0.8
+        self.x = max(0.0, min(float(self.desk_w - BASE_W), self.x))
+
+        if t >= self._AGGR_LAUGH_TICKS:
+            # All done — resume normal roaming
+            self.squish_x = self._fat_scale
+            self.squish_y = self._fat_scale
+            self.angle    = 0.0
+            self._aggr_state    = "idle"
+            self._aggr_cooldown = self._AGGR_COOLDOWN_TICKS
+            self.anim = self._aggr_saved_anim
+            self.vx   = self._aggr_saved_vx
+            self.vy   = self._aggr_saved_vy
+            self._pick_new_behaviour()
+
     def _quit(self, *_):
         """Trigger death animation; audio + actual quit fire at its end."""
         if self._dying:
             return
         self._dying   = True
         self._die_tick = 0
+        self._stop_sponge_scrub()
+        if self._sponge_mode:
+            self._sponge_mode = False
+            self._sponge_win.hide()
 
     def _maybe_speak(self):
         """Called periodically; randomly picks and plays a voice line."""
@@ -1870,30 +3202,97 @@ class KingPet:
                 "king-harkinian-pet", PNG_PATH,
                 AppIndicator3.IndicatorCategory.APPLICATION_STATUS)
             self.indicator.set_status(AppIndicator3.IndicatorStatus.ACTIVE)
-            menu = Gtk.Menu()
-            for label, cb in [("Toggle King Harkinian", self._toggle),
-                               ("Speak!", lambda *_: self._play_voice(random.choice(VOICE_LINES)) if VOICE_LINES else None),
-                               ("Quit",   self._quit)]:
-                item = Gtk.MenuItem(label=label)
-                item.connect("activate", cb)
-                menu.append(item)
-            menu.show_all()
-            self.indicator.set_menu(menu)
+            self._tray_menu_indicator = self._make_tray_menu()
+            self.indicator.set_menu(self._tray_menu_indicator)
         else:
             self.tray = Gtk.StatusIcon.new_from_file(PNG_PATH)
             self.tray.set_tooltip_text("King Harkinian – right-click to control")
-            self.tray.connect("popup-menu", self._tray_menu)
+            self.tray.connect("popup-menu", self._tray_popup)
 
-    def _tray_menu(self, icon, button, time):
+    def _make_tray_menu(self):
+        """Build (or rebuild) the tray context menu."""
         menu = Gtk.Menu()
-        for label, cb in [("Toggle King Harkinian", self._toggle),
-                           ("Speak!", lambda *_: self._play_voice(random.choice(VOICE_LINES)) if VOICE_LINES else None),
-                           ("Quit",   self._quit)]:
-            item = Gtk.MenuItem(label=label)
-            item.connect("activate", cb)
-            menu.append(item)
+
+        toggle_item = Gtk.MenuItem(label="Toggle King Harkinian")
+        toggle_item.connect("activate", self._toggle)
+        menu.append(toggle_item)
+
+        speak_item = Gtk.MenuItem(label="Speak!")
+        speak_item.connect("activate",
+                           lambda *_: self._play_voice(random.choice(VOICE_LINES)) if VOICE_LINES else None)
+        menu.append(speak_item)
+
+        # Aggressive Mode toggle (disabled if neither wnck nor xdotool available)
+        aggr_avail = HAS_WNCK or HAS_XDOTOOL
+        aggr_label = ("☠ Aggressive Mode: ON" if self._aggressive_mode
+                      else "☠ Aggressive Mode: OFF")
+        if not aggr_avail:
+            aggr_label += " (needs python3-wnck or xdotool)"
+        self._aggr_menu_item = Gtk.MenuItem(label=aggr_label)
+        self._aggr_menu_item.set_sensitive(aggr_avail)
+        self._aggr_menu_item.connect("activate", self._toggle_aggressive_mode)
+        menu.append(self._aggr_menu_item)
+
+        shitting_label = ("💩 Desktop Shitting: ON" if self._shitting_enabled
+                          else "💩 Desktop Shitting: OFF")
+        shitting_item = Gtk.MenuItem(label=shitting_label)
+        shitting_item.connect("activate", self._toggle_desktop_shitting)
+        menu.append(shitting_item)
+
+        sep = Gtk.SeparatorMenuItem()
+        menu.append(sep)
+
+        quit_item = Gtk.MenuItem(label="Quit")
+        quit_item.connect("activate", self._quit)
+        menu.append(quit_item)
+
         menu.show_all()
+        return menu
+
+    def _refresh_tray_menu(self):
+        """Rebuild and re-attach the tray menu so the label reflects current state."""
+        if HAS_INDICATOR:
+            self._tray_menu_indicator = self._make_tray_menu()
+            self.indicator.set_menu(self._tray_menu_indicator)
+        # StatusIcon menus are built fresh on each popup, nothing to do here.
+
+    def _tray_popup(self, icon, button, time):
+        menu = self._make_tray_menu()
         menu.popup(None, None, None, None, button, time)
+
+    def _toggle_aggressive_mode(self, *_):
+        if not (HAS_WNCK or HAS_XDOTOOL):
+            return
+        self._aggressive_mode = not self._aggressive_mode
+        if self._aggressive_mode:
+            # Start the cooldown so the first hunt fires after ~15 s
+            self._aggr_cooldown = self._AGGR_COOLDOWN_TICKS
+            self._aggr_state    = "idle"
+        else:
+            # Abort any in-progress execution
+            self._aggr_state = "idle"
+        self._refresh_tray_menu()
+
+    def _toggle_desktop_shitting(self, *_):
+        self._shitting_enabled = not self._shitting_enabled
+        if not self._shitting_enabled:
+            self._defecation_pending = False
+            self._defecation_due_at = None
+            if self._defecating:
+                self._defecating = False
+                self.anim = self._defecation_saved_anim
+                self.vx = self._defecation_saved_vx
+                self.vy = self._defecation_saved_vy
+                self.facing = self._defecation_saved_facing
+                self.angle = 0.0
+                self.squish_x = self._fat_scale
+                self.squish_y = self._fat_scale
+            if self._sponge_mode:
+                self._toggle_sponge_mode()
+            self.sponge_btn_win.hide()
+        elif self._sponge_pixbuf is not None:
+            self.sponge_btn_win.show_all()
+        self._refresh_tray_menu()
 
     def _toggle(self, *_):
         if self.win.get_visible():
@@ -1967,7 +3366,8 @@ class KingPet:
     def _on_king_motion(self, widget, event):
         """Track cursor velocity over the King sprite; detect rapid rubbing."""
         # Don't interfere with eating/dying/hit mode
-        if self._dying or self._eating or self._hit_mode:
+        if (self._dying or self._eating or self._hit_mode
+                or self._sponge_mode):
             return
 
         cx = event.x_root
@@ -2140,6 +3540,8 @@ class KingPet:
         # Redraw Hit Mode button if active (for pulse animation)
         if self._hit_mode:
             self.hit_btn_win.queue_draw()
+        if self._sponge_mode:
+            self.sponge_btn_win.queue_draw()
 
         # Redraw score window every tick so the pulse animation runs smoothly
         if self._score_win.get_visible():
@@ -2154,6 +3556,13 @@ class KingPet:
             ptr  = seat.get_pointer()
             scr, px, py = ptr.get_position()
             self._update_fist(float(px), float(py), hit_detect=False)
+
+        if self._sponge_mode:
+            disp = Gdk.Display.get_default()
+            seat = disp.get_default_seat()
+            ptr = seat.get_pointer()
+            scr, px, py = ptr.get_position()
+            self._update_sponge_cursor(float(px), float(py))
 
         # Update food drag position by polling the global pointer
         if self._food_dragging:
@@ -2195,8 +3604,27 @@ class KingPet:
             self._render()
             return True
 
+        defecation_due = (
+            self._defecation_pending
+            and self._defecation_due_at is not None
+            and time.monotonic() >= self._defecation_due_at)
+        if self._defecating:
+            self._tick_defecation()
+            self._render()
+            return True
+
+        aggr_busy = self._aggressive_mode and self._aggr_state != "idle"
+        if (defecation_due and not self._hit_mode and not self._hit_active
+                and not self._hit_recovering and not self._exploding
+                and not self._tickle_active and not self._tickle_recovery
+                and not aggr_busy):
+            if self._start_defecation():
+                self._tick_defecation()
+                self._render()
+                return True
+
         # Tickle is disabled in Hit Mode
-        if not self._hit_mode:
+        if not self._hit_mode and not self._sponge_mode:
             if self._tickle_active:
                 self._tick_tickle()
                 self._render()
@@ -2206,6 +3634,18 @@ class KingPet:
                 self._tick_tickle_recovery()
                 self._render()
                 return True
+
+        # Aggressive Mode — King hunts and executes windows
+        # Active states ("walk", "kick", "laugh") take full control of rendering;
+        # "idle" just ticks the cooldown counter alongside normal behaviour.
+        if self._aggressive_mode:
+            if self._aggr_state in ("walk", "kick", "laugh", "indignant",
+                                    "icon_kick"):
+                self._tick_aggressive()
+                self._render()
+                return True
+            else:
+                self._tick_aggressive()   # tick cooldown / trigger hunt silently
 
         self.anim_timer -= 1
         if self.anim_timer <= 0:
@@ -2615,6 +4055,15 @@ class KingPet:
         if self.y + eff_h > self.desk_h:  self.y = self.desk_h - eff_h; self.vy = -abs(self.vy)
 
     # ── Render ────────────────────────────────────────────────────────────────
+    def _stack_poop_stains_below_king(self):
+        king_window = self.win.get_window()
+        if king_window is None:
+            return
+        for stain in self._poop_stains:
+            stain_window = stain["win"].get_window()
+            if stain_window is not None:
+                stain_window.restack(king_window, False)
+
     def _render(self):
         img_w = max(10, int(BASE_W * abs(self.squish_x)))
         img_h = max(10, int(BASE_H * abs(self.squish_y)))
@@ -2652,6 +4101,7 @@ class KingPet:
         self._cur_img_h  = img_h
         self._cur_canvas_w = canvas_w
         self._cur_canvas_h = canvas_h
+        self._stack_poop_stains_below_king()
         self.win.queue_draw()
 
     def _on_draw(self, widget, cr):

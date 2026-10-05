@@ -11,6 +11,9 @@
 A gloriously low-effort GTK desktop pet that plops the King himself right onto your Linux desktop. He roams around, squishes, spins, bounces, shakes, and randomly yells his iconic CD-i voice lines at you when you least expect it. Just like real royalty. 👑
 You also have to feed him with the food dispensed from the iconic Dinner Machine! Bro, if you haven't watched the iconic <a href="https://www.youtube.com/watch?v=5k6lu1ynsBk" target="_blank">"The King gets a Dinner Machine"</a> by Nin10Guy, then go fucking watch it, you uncultured swine!
 
+> [!WARNING]
+> **This is built and tested for Linux Mint 22, Cinnamon, on an X11 session.** The King uses X11-style window management for his more invasive nonsense, and desktop-icon targeting reads Nemo's saved icon positions. Other Linux distributions, desktop environments, file managers, and Wayland sessions are **not tested or officially supported**. Maybe he'll work there; maybe he'll get lost, ignore your icons, or throw a royal tantrum. Imake no promises outside the kingdom I actually tested this piece of shit lol.
+
 ---
 
 ## 🔽 DOWNLOAD
@@ -27,6 +30,20 @@ Before you dare run this, make sure you have the necessary garbage installed:
 sudo apt install python3-gi gir1.2-gtk-3.0 gir1.2-gdkpixbuf-2.0 gir1.2-appindicator3-0.1
 ```
 
+**Optional (Aggressive Mode window management — install one of these):**
+
+```bash
+sudo apt install gir1.2-wnck-3.0
+```
+
+Or, if you'd rather use the fallback:
+
+```bash
+sudo apt install xdotool
+```
+
+Without either one, the King will still wander around and do his other nonsense, but **Aggressive Mode stays disabled**. Install both if you enjoy collecting packages; when Wnck is available, the script prefers it.
+
 **Optional (but strongly recommended for better audio):**
 
 ```bash
@@ -34,6 +51,8 @@ pip install pygame
 ```
 
 If you don't have `pygame`, the script falls back to `aplay` which ships with `alsa-utils` and is probably already on your machine. If you have neither, the King will roam your desktop in absolute silence like a cursed ghost. Your choice. 🤷🏻‍♂️
+
+Desktop Shitting and Sponge Mode need no additional packages beyond the required GTK/GIO stack and the existing `pygame`/`aplay` audio backends. Aggressive Mode needs one of the optional window-management packages above. Don't go `pip install`-ing a sponge. That's not how sponges work.
 
 ---
 
@@ -75,9 +94,15 @@ steak.png
 strawberry-cake.png
 salmon.png
 hot-dog.png
+shit.png
+Sponge.png
+shit.mp3
+sponge-scrub.mp3
 ```
 
 The food images, dinner machine, and fist are optional — if they're not there, those features simply won't appear. The King will still roam your desktop like a normal unstable monarch.
+
+Keep `shit.png`, `Sponge.png`, `shit.mp3`, and `sponge-scrub.mp3` beside the script for the desktop-pooping and Sponge Mode features. Missing image files disable their related visuals; missing sound files just make those moments quieter. The King will not be quieter emotionally.
 
 The script will silently skip any MP3s it can't find, so you won't get an error if you're missing some. You'll just get a less unhinged experience, which is your loss honestly.
 
@@ -103,11 +128,13 @@ That's it. The King appears. You're welcome, bitch.
 | **Left-click** the King | Forces him to speak immediately. Rude, but effective. |
 | **Right-click** the King | Kills him. He'll have something to say about it. |
 | **Tray icon** (right-click) | Toggle visibility, make him speak, or quit |
+| **Desktop Shitting** (tray menu, below Aggressive Mode) | Toggle the King's post-meal desktop mess on or off. It's on by default. Turning it off also hides SPONGE MODE. |
 | **Left-click** the Dinner Machine | Picks a random food and sticks it to your cursor. You are now responsible for feeding the King. |
 | **Left-click** to place food | Drops the food on the desktop. The King will handle the rest. He always handles dinner. |
 | **Rapidly rub** the King | Tickles him. He will scream. Repeatedly. You monster. |
 | **HIT MODE button** (bottom-left) | Replaces your cursor with a fist. You know what it's for. |
 | **Swipe the fist** across the King | Sends him flying with actual physics. You asked for this. |
+| **SPONGE MODE button** (directly above HIT MODE) | Replaces your cursor with a sponge. Scrub desktop messes away. Finally, a productive use for your cursor. |
 
 ---
 
@@ -212,6 +239,8 @@ Want to add your own? Drop any 512×512 PNG into the script folder, add the file
 
 The Dinner Machine disappears when Hit Mode is active, because you can't punch a king AND feed him at the same time. Choose your priorities.
 
+When **Desktop Shitting** is enabled in the tray menu (on by default), the King may wait 10–30 seconds after eating, perform a dramatic royal squat, yell *"OAH!"* three times, and leave a mess on your desktop. The stain starts at 128×128 and scales up with his fatness to a maximum of 1.8×. Turn it off to stop pending or in-progress defecation and hide the **SPONGE MODE** button; existing messes remain. When enabled, **SPONGE MODE** above HIT MODE attaches a 128×128 `Sponge.png` to your cursor; every opaque sponge pixel can scrub every opaque mess pixel beneath it, so the whole sponge actually does its damn job. Wipe it over the mess repeatedly to clean it up. The scrub sound only plays while the moving sponge is actually rubbing opaque parts of the mess. He has outsourced cleanup to you. Naturally.
+
 ---
 
 ## 😂 TICKLING
@@ -249,6 +278,45 @@ A few notes on the physics, because this was clearly thought about:
 When you're done assaulting the King and click **STOP HIT**, he snaps back to normal roaming immediately, dignity somehow still technically intact. The Dinner Machine reappears. You can feed him again if you feel like making up for what you just did.
 
 ---
+
+## 💩 Desktop Shitting
+
+Yep, the King can literally take a fucking dump on your desktop now. Because apparently being a wandering monarch who yells about dinner wasn't enough.
+
+**Desktop Shitting** is a separate tray-menu toggle, directly below Aggressive Mode. It's on by default. Once the King finishes eating and burping, he schedules one dramatic dump for a random 10–30 seconds later. He squats, yells "OAH!" three times, then drops `shit.png` beneath himself while `shit.mp3` plays. The stain starts at 128×128 and grows with the King's fatness, up to 1.8× that size. Even his crap has a growth plan.
+
+He won't start the routine while he's being flung through the air or recovering from a Hit Mode beating. If eating enough food makes him explode, the pending dump gets cancelled; after he respawns, he needs to eat again before he can schedule another. His bowels may be royal, but they do not survive death.
+
+Turn **Desktop Shitting** off in the tray menu to cancel a pending or in-progress routine. Existing stains stay on your desktop, because turning off the feature is not a magical poop-delete spell. The **SPONGE MODE** button also disappears until Desktop Shitting is enabled again.
+
+---
+
+## 🧽 Sponge Mode
+
+The King has left a mess. Congratulations: you're now the janitor.
+
+Click **SPONGE MODE**, the yellow-green button above **HIT MODE**, and `Sponge.png` attaches to your cursor. Move the whole sponge over the stain to scrub it away gradually. Proper alpha testing checks the opaque parts of the sponge against the remaining opaque mess, so transparent corners don't count as cleaning. Keep moving across the stain; hovering like a damp statue won't do a damn thing.
+
+`sponge-scrub.mp3` plays only while the sponge is moving over opaque stain pixels, and cuts off when you stop or move away. The King also cannot be tickled while Sponge Mode is active. He's already made you clean up his shit; do you really need to torment him during the paperwork?
+
+The button is available only while Desktop Shitting is enabled and the sponge image is present. Turning Desktop Shitting off hides the button and exits Sponge Mode.
+
+---
+
+## ☠️ Aggressive Mode
+
+Toggle **Aggressive Mode** from the tray menu if you want the King to stop peacefully roaming and start acting like an entitled little bastard. This feature needs the optional window-management support (`gir1.2-wnck-3.0` or `xdotool`); without either one, the menu option stays disabled.
+
+Every so often, he may choose a visible, ordinary window, march toward its estimated close button, and kick it shut. The button position is approximate, not blessed by a divine window-coordinate oracle. If you drag the target window away while he's approaching, he'll get indignant; keep doing it and he'll throw a tantrum. You were warned. The King does not appreciate being messed with while he is trying to mess with you.
+
+---
+
+## 🥾 Desktop-Icon Kicking
+
+As an extra Aggressive Mode stunt, the King can very rarely target a launchable `.desktop` shortcut on your desktop—but only if Nemo has saved a position for it. He walks to the nearest clear side, faces the icon, stares for three seconds while `hmm.mp3` plays, then kicks it and launches the shortcut's actual target. After a victorious laugh, he resumes roaming like this was a normal thing to do.
+
+He won't start an icon kick while a fullscreen or maximized window is detected; if one appears during the routine, he aborts before launching the shortcut. Aggressive Mode is built and tested for Linux Mint 22 Cinnamon on X11; other desktop environments and Wayland sessions are untested, so don't act surprised if the King gets confused outside his kingdom.
+
 
 ## 🚀 AUTOSTART (Optional)
 
@@ -288,7 +356,7 @@ I use the Documents folder myself, but you can change it to wherever the hell yo
 
 ## ☢️ FUN TIP
 
-In Linux Mint 22 Cinnamon, you can add the (`king-harkinian-pet.desktop`) file to (`.local/share/applications/`) to add it to your applications menu and pin it to your panel! \
+You can add the (`king-harkinian-pet.desktop`) file to (`.local/share/applications/`) to add it to your applications menu and pin it to your panel! \
 If you attached the icon file correctly, then the King will show up inside your panel too, always judging you from there.
 
 ---
@@ -296,6 +364,18 @@ If you attached the icon file correctly, then the King will show up inside your 
 ## 🐛 FIXES & CHANGES
 
 ### What's new in this update, you impatient person:
+
+**Aggressive Mode** — The King now occasionally picks a visible, ordinary window, stomps over to its approximate close button, and kicks it shut. If you keep dragging the window away from him, he gets indignant, then throws a full royal tantrum. Maybe stop teasing him. Or don't. You clearly have issues.
+
+**Desktop-icon kicking** — While Aggressive Mode is on, he may also pick a desktop shortcut with a saved Nemo icon position, slowly march to the nearest clear side, stare at it for three seconds while playing `hmm.mp3`, then boot it and launch whatever it points to. He faces the icon, mirrors the kick correctly, laughs, and resumes roaming. Shortcuts with "harkinian" in their displayed name or filename get a tiny 1.5× nudge in the random selection, because the King has a suspiciously high opinion of himself. This happens every so often, not every five seconds, you impatient little gremlin.
+
+**Desktop Shitting toggle** — Added a separate tray-menu switch, on by default, because apparently the King needed a bowel policy. After eating, he can wait 10–30 seconds, perform a dramatic squat, yell OAH three times, and leave a 128×128 mess. Turn the feature off and he stops pending or in-progress shitting; the Sponge Mode button disappears. Existing messes stay put. You made this mess. Technically, he did.
+
+**Sponge Mode** — The sponge cursor now lets you scrub the opaque pixels off the desktop mess bit by bit. The scrub sound only plays while the moving sponge is actually rubbing the mess. Turn Desktop Shitting off and the sponge button vanishes too. And no, you can't tickle the King while Sponge Mode is active. He's busy being subjected to your janitorial regime.
+
+**Tickling** — Rapidly rub the King back and forth to make him squirm, scream, and interrupt whatever he was saying. Stop rubbing and he'll wobble himself back to dignity. He will deny everything.
+
+**HIT MODE** — Replaced the cursor with a fist and added swipe-based hits, knockback, bouncing, spinning, combo scoring, and an indignant recovery. The fist points at the King, because even violence deserves basic navigation.
 
 **Hit counter** — The script now tracks your score for keeping the King in the air by consecutive hits to him! Kinda mean, but fun for sure. Just not for him.
 
@@ -315,16 +395,31 @@ If you attached the icon file correctly, then the King will show up inside your 
 > **A:** No. GTK desktop pets are a Linux thing. Get a real operating system. 😁
 
 > **Q: Which distros is this compatible with?** \
-> **A:** I dunno exactly. It works on my Linux Mint 22 Cinnamon machine. Go try it out and you'll see if the King hates you or not.
+> **A:** Linux Mint 22 with Cinnamon on X11 is the tested setup. Everything else is untested and unsupported. The King has not been sent on tour.
+
+> **Q: Why is Aggressive Mode trying to kick my windows closed?** \
+> **A:** That's because the King hates any windowed windows in this mode, idiot! 😂
+
+> **Q: Why did the King kick my desktop shortcut and launch the app?** \
+> **A:** Well, he is a very entitled monarch, you know? 
+
+> **Q: Can I stop the King from shitting on my desktop?** \
+> **A:** Yeah, you can, but why would you want to?
+
+> **Q: Why is the Sponge Mode button gone?** \
+> **A:** Bruh, do I really have to say it? YOU DISABLED DESKTOP SHITTING! That's why it's gone! 🙄
+
+> **Q: Why can't I tickle him while I'm using the sponge?** \
+> **A:** Isn't it obvious enough? 🙄
 
 > **Q: Why are the animations looking so badly?** \
 > **A:** Bruh, you never seen the CD-i Zelda cutscenes? They're intentionally like this, you fucking uncultured shit.
 
 > **Q: The King isn't making any sounds!** \
-> **A:** Install `pygame` or check if `aplay` is on your system. Also check that the MP3 files are in the same folder as the script. The King cannot speak if you don't give him his voice lines.
+> **A:** Install `pygame` or check if `aplay` is on your system. Also check that the MP3 files are in the same folder as the script. The King cannot speak if you don't give him his voice lines, dickwad.
 
 > **Q: Can I add my own voice lines?** \
-> **A:** Yes! Drop any MP3 into the script folder and add the filename to the `VOICE_LINES` list in `king_harkinian_pet.py`. The King will add it to his repertoire immediately. 🎙️
+> **A:** Yep! Drop any MP3 file into the script folder and add the filename to the `VOICE_LINES` list in `king_harkinian_pet.py`. The King will add it to his repertoire immediately. 🎙️
 
 > **Q: Why does he face left sometimes?** \
 > **A:** Because he's walking left, genius. He mirrors automatically depending on which direction he's moving. The spin, shake, vibrate, stomp, moonwalk, flatline, creep, and glitch animations are exempt from mirroring because they either don't travel, look stupid flipped, or are already chaotic enough that nobody's checking. The King has standards. Variable standards, but standards.
@@ -363,8 +458,8 @@ If you attached the icon file correctly, then the King will show up inside your 
 
 ## 🛠️ TESTED ON
 
-* **Linux Mint 22 Cinnamon** — works perfectly, obviously
-* Probably works on Ubuntu, Debian, and anything else GTK-friendly. I dunno, too lazy to test, now fuck off!
+* **Linux Mint 22 Cinnamon on X11** — the tested setup
+* Other distros, desktop environments, file managers, and Wayland sessions are untested and unsupported. The King has not granted them royal certification.
 
 ---
 
